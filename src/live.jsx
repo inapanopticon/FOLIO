@@ -213,7 +213,7 @@ function SettingsScreen({ onClose, onToast, onExport }) {
           {s.preferences && <button onClick={()=>set('preferences','')} style={{...button,padding:'14px 18px',borderBottom:line,width:'100%',textAlign:'left'}}>Reset preferences</button>}
           <div style={{ padding: '14px 18px', borderBottom: line }}><div style={label}>YOUR DATA</div></div>
           <button onClick={onExport} style={{ ...button, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, padding: '18px', textAlign: 'left', width: '100%', borderBottom: line }}>
-            <span><span style={{ display: 'block', fontSize: TY.body, lineHeight: 1.5 }}>Export as Markdown</span><span style={{ display: 'block', fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6, marginTop: 6 }}>Every drawer, title, summary, tag and note in one file.</span></span><Arrow dir="right"/>
+            <span><span style={{ display: 'block', fontSize: TY.body, lineHeight: 1.5 }}>Export as Markdown</span><span style={{ display: 'block', fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6, marginTop: 6 }}>Every drawer, title, summary, tag and note, with screenshots in an images folder (zip).</span></span><Arrow dir="right"/>
           </button>
           <details style={{ borderBottom: line }}>
             <summary style={{ ...label, padding: '18px', cursor: 'pointer', display: 'list-item', listStylePosition: 'inside' }}>ADVANCED</summary>
@@ -259,6 +259,7 @@ function LiveImportScreen({ collections, target, resume, initialFiles, onClose, 
   const [visibleCount,setVisibleCount]=useLState(60);
   const [dragOver,setDragOver]=useLState(false);
   const [reviewing,setReviewing]=useLState(false);
+  const [confirm,setConfirm]=useLState(null);  // delete-import sheet (hooks must stay above the early returns)
   const fileRef=useLRef();
   const batchRef=useLRef(batchId);batchRef.current=batchId;
   useLEffect(()=>{
@@ -336,7 +337,6 @@ function LiveImportScreen({ collections, target, resume, initialFiles, onClose, 
     ].filter(([k]) => k > 0);
     return parts.length ? parts.map(([k, w]) => `${k} ${w}`).join(' · ') : 'Empty';
   };
-  const [confirm,setConfirm]=useLState(null);
   const askDelete = b => {
     const list = data.imports.tasks.filter(t => t.batchId === b.id && t.state !== 'removed');
     const saved = list.filter(t => t.state === 'kept').length;

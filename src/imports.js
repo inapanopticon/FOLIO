@@ -83,7 +83,7 @@ window.LocusImports = (() => {
     change(d=>{
       const task=d.imports.tasks.find(t=>t.id===id);
       if(!task || task.state!=='screen')return d;
-      return {...d,imports:{...d.imports,screenHintSeen:true,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:keep ? 'ready' : 'skipped',screened:true} : t),batches:d.imports.batches.map(b=>b.id===task.batchId ? {...b,screenHistory:[...(b.screenHistory || []),id]} : b)}};
+      return {...d,imports:{...d.imports,screenHintSeen:true,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:keep ? 'ready' : 'skipped',screened:true,decidedAt:Date.now()} : t),batches:d.imports.batches.map(b=>b.id===task.batchId ? {...b,screenHistory:[...(b.screenHistory || []),id]} : b)}};
     });
   }
   function undoScreen(batchId) {
@@ -175,6 +175,33 @@ window.LocusImports = (() => {
         decisions:d.imports.decisions.filter(x=>!mine.has(x.item?.taskId))}}));
     for(const t of tasks) if(drop.has(t.id) && t.imageId) { try { await I.remove(t.imageId); } catch(e) {} }
   }
+  // Housekeeping, run once when the app opens:
+  // 1. Photos you skipped (in review or on the results page) keep their image for CLEAN_DAYS so you can
+  //    change your mind; after that the image is deleted and the photo can be imported again later.
+  // 2. Any stored image that nothing points to any more (left behind by a crash or an old bug) is deleted.
+  const CLEAN_DAYS = 7;
+  async function cleanup() {
+    const cutoff = Date.now() - CLEAN_DAYS * 864e5;
+    const old = ledger(snapshot()).tasks.filter(t => ['skipped','discarded'].includes(t.state)
+      && (t.decidedAt || t.updatedAt || t.createdAt || 0) < cutoff && !(running && running.batchId === t.batchId));
+    if (old.length) {
+      const ids = new Set(old.map(t => t.id));
+      change(d => ({...d, imports: {...d.imports,
+        tasks: d.imports.tasks.map(t => ids.has(t.id) ? {...t, state: 'removed', result: null, cleared: true} : t),
+        decisions: d.imports.decisions.filter(x => !ids.has(x.item?.taskId))}}));
+      for (const t of old) await I.remove(t.imageId);
+    }
+    const keys = await I.keys();
+    if (!keys) return { cleared: old.length, orphans: 0 };
+    const d = snapshot(), L = ledger(d), used = new Set();
+    d.captures.forEach(c => { if (c.imageId) used.add(c.imageId); (c.imageIds || []).forEach(i => used.add(i)); });
+    L.tasks.forEach(t => { if (t.state !== 'removed' && t.imageId) used.add(t.imageId); });
+    d.queue.forEach(q => { if (q.imageId) used.add(q.imageId); });
+    L.decisions.forEach(x => { if (x.item?.imageId) used.add(x.item.imageId); });
+    let orphans = 0;
+    for (const k of keys) if (!used.has(k) && !I.isFresh(k)) { await I.remove(k); orphans++; }
+    return { cleared: old.length, orphans };
+  }
   function makeCollection(name,cols) {
     const base=name.toLowerCase().replace(/[^a-z0-9一-鿿]+/g,'-').replace(/^-|-$/g,'') || 'drawer';
     let id=base,n=2;while(cols.some(c=>c.id===id))id=`${base}-${n++}`;
@@ -197,7 +224,7 @@ window.LocusImports = (() => {
         } else discarded++;
         journal.push({id:uid('decision'),item,action:decision.action,collection:decision.collection,captureId:capture?.id,createdCollection,at:Date.now()});
         queue=queue.filter(q=>q.id!==item.id);
-        tasks=tasks.map(t=>t.id===item.taskId ? {...t,state:capture ? 'kept' : 'discarded',captureId:capture?.id} : t);
+        tasks=tasks.map(t=>t.id===item.taskId ? {...t,state:capture ? 'kept' : 'discarded',captureId:capture?.id,decidedAt:Date.now()} : t);
       }
       return {...d,collections:cols,captures:caps,queue,imports:{...d.imports,tasks,decisions:journal}};
     });return {kept,discarded};
@@ -223,5 +250,5 @@ window.LocusImports = (() => {
       return {...d,queue:[...d.queue,last.item],imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:'queued'} : t),decisions:d.imports.decisions.filter(x=>x.item.taskId!==id)}};
     });
   }
-  return {snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,screen,undoScreen,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
+  return {snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,screen,undoScreen,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
 })();

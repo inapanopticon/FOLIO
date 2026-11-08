@@ -6,6 +6,7 @@ window.LocusImages = (() => {
   const STORE = 'images';
   let dbPromise = null;
   const cache = new Map(); // id -> dataURL
+  const fresh = new Set(); // saved during this visit: never treated as leftovers (a note may not be committed yet)
 
   function open() {
     if (!dbPromise) {
@@ -31,7 +32,7 @@ window.LocusImages = (() => {
   }
 
   async function put(id, dataUrl, strict = false) {
-    cache.set(id, dataUrl);
+    cache.set(id, dataUrl); fresh.add(id);
     try { await tx('readwrite', (s) => s.put(dataUrl, id)); } catch (e) { cache.delete(id); if (strict) throw e; console.warn('image save failed', e); }
   }
 
@@ -73,5 +74,9 @@ window.LocusImages = (() => {
     });
   }
 
-  return { put, get, remove, resize };
+  // Every stored id, or null if storage can't be read (then nothing is cleaned up).
+  async function keys() {
+    try { return await tx('readonly', (s) => s.getAllKeys()); } catch (e) { return null; }
+  }
+  return { put, get, remove, resize, keys, isFresh: (id) => fresh.has(id) };
 })();

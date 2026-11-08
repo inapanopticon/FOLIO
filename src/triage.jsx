@@ -46,8 +46,8 @@ function PhotoReviewScreen({ batchId, tasks, batch, palette, hintSeen, onBack, o
         <div aria-label="Photo to review" onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={()=>{start.current=null;setDrag(0);}} style={{touchAction:'pan-y',transform:`translateX(${drag*0.2}px)`,transition:drag ? 'none' : 'transform .15s'}}>
           <Shot imageId={current.imageId} fit="natural" style={{width:'100%'}}/>
           <div aria-hidden="true" style={{position:'sticky',bottom:0,display:'flex',justifyContent:'space-between',padding:'0 14px 14px',pointerEvents:'none',marginTop:-46}}>
-            <span style={{padding:'6px 12px',borderRadius:99,background:'var(--ink)',color:'var(--cream)',fontSize:TY.caption,opacity:skipHint}}>Skip</span>
-            <span style={{padding:'6px 12px',borderRadius:99,background:'var(--ink)',color:'var(--cream)',fontSize:TY.caption,opacity:keepHint}}>Keep for AI</span>
+            <span style={{padding:'8px 14px',borderRadius:0,background:'var(--ink)',color:'var(--cream)',fontSize:TY.caption,opacity:skipHint}}>Skip</span>
+            <span style={{padding:'8px 14px',borderRadius:0,background:'var(--ink)',color:'var(--cream)',fontSize:TY.caption,opacity:keepHint}}>Keep for AI</span>
           </div>
         </div>
       </div>

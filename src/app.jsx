@@ -43,6 +43,8 @@ function App() {
     window.addEventListener('locus:storage-error',failed);
     return ()=>{unsubscribe();window.removeEventListener('locus:storage-error',failed);};
   },[]);
+  // once per launch, a moment after opening: clear old skipped photos and leftover images
+  useAEffect(()=>{ if(boot.error) return; const t=setTimeout(()=>window.LocusImports.cleanup().catch(()=>{}),2000); return ()=>clearTimeout(t); },[]);
   const setCollections = value => STORE.update(d=>({...d,collections:typeof value==='function' ? value(d.collections) : value}));
 
   // real counts from the captures that actually exist
@@ -285,8 +287,9 @@ function App() {
         />); break;
       case 'settings': inner = (
         <SettingsScreen onClose={() => pop()} onToast={showToast} onExport={()=>{
-          const n = window.LocusStore.downloadMarkdown({ collections, captures });
-          showToast(`Exported ${n} captures`);
+          window.LocusStore.exportAll({ collections, captures })
+            .then(r => showToast(r.images ? `Exported ${r.captures} captures · ${r.images} images` : `Exported ${r.captures} captures`))
+            .catch(() => showToast('Export failed. Please try again.'));
         }}/>
       ); break;
       case 'triage': inner = queue.length === 0 ? null : (

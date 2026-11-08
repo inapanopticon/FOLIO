@@ -111,13 +111,14 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .toast-host {
   position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 0; right: 0;
   display: flex; justify-content: center; z-index: 300;
-  pointer-events: none; padding: 0 16px;
+  pointer-events: none; padding: 0;
 }
 .toast {
   font-family: var(--sans); font-size: var(--t-label);
   color: var(--cream); background: var(--ink);
-  padding: 9px 16px; border-radius: 99px;
-  display: flex; align-items: center; gap: 10px;
+  /* a full-width ink strip, square like the rest of the grid */
+  width: 100%; min-height: 52px; padding: 0 18px; border-radius: 0; /* sits exactly over the header row */
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   animation: toastIn 0.34s cubic-bezier(0.2,0.8,0.2,1) both;
   pointer-events: auto;
 }

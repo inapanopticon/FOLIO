@@ -200,16 +200,37 @@ function HomeScreen({ collections, captures, queueCount, importCount = 0, onOpen
 }
 
 // =============== DRAWER MENU (Edit from swipe, long-press or right-click) ===============
+// Colour swatches as a grid of square cells (8 per row), no gaps. The chosen colour stays at full
+// strength and every other one fades (user's pick), so the choice is obvious at a glance.
 function ColorPicker({ value, onPick }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))' }}>
       {THEME.PALETTE.map((p, i) => (
         <button key={p.name} onClick={() => onPick(i)} aria-label={p.name} aria-pressed={value === i} style={{
-          aspectRatio: '1', borderRadius: '50%', background: p.bg, cursor: 'pointer', padding: 0,
-          border: value === i ? '2px solid var(--ink)' : '2px solid transparent',
-          outline: value === i ? '2px solid var(--cream)' : 'none', outlineOffset: -4,
+          aspectRatio: '1', borderRadius: 0, background: p.bg, cursor: 'pointer', padding: 0, border: 'none',
+          opacity: value == null || value < 0 || value === i ? 1 : 0.28, transition: 'opacity .15s',
+          // a thin ink frame too: pale colours (sage, mist) would otherwise blend into the faded ones
+          boxShadow: value === i ? 'inset 0 0 0 2px var(--ink)' : 'none',
         }}/>
       ))}
+    </div>
+  );
+}
+
+// Bottom sheets share the hairline grid: square corners, full-width rows split by hairlines,
+// small uppercase section labels, and a footer of equal cells.
+const SHEET_LINE = '1px solid var(--line)';
+const sheetLabel = { padding: '14px 18px', fontSize: TY.caption, letterSpacing: '0.12em', color: 'var(--ink-2)', borderTop: SHEET_LINE, borderBottom: SHEET_LINE };
+const sheetRow = { display: 'block', width: '100%', textAlign: 'left', padding: '18px', fontSize: TY.body, lineHeight: 1.4,
+  background: 'none', border: 'none', borderTop: SHEET_LINE, borderRadius: 0, color: 'var(--ink)', cursor: 'pointer' };
+function Sheet({ onClose, zIndex, children }) {
+  return (
+    <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex, background: 'rgba(29,28,26,0.35)',
+      display: 'flex', alignItems: 'flex-end', animation: 'pgUpIn 0.2s ease both' }}>
+      <div onClick={(e) => e.stopPropagation()} className="safe-bottom" style={{ width: '100%', background: 'var(--cream)',
+        borderTop: SHEET_LINE, overflow: 'hidden' }}>
+        {children}
+      </div>
     </div>
   );
 }
@@ -218,27 +239,18 @@ function DrawerMenu({ collection, collections, onClose, onRename, onRecolor, onD
   const col = THEME.colorOf(collection, collections);
   const current = THEME.PALETTE.indexOf(col);
   return (
-    <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex: 250, background: 'rgba(29,28,26,0.35)',
-      display: 'flex', alignItems: 'flex-end', animation: 'pgUpIn 0.2s ease both' }}>
-      <div onClick={(e) => e.stopPropagation()} className="safe-bottom" style={{ width: '100%', background: 'var(--cream)',
-        borderRadius: '20px 20px 0 0', paddingTop: 0, overflow: 'hidden' }}>
-        <div style={{ background: col.bg, color: col.fg, padding: '22px 18px 20px', fontSize: TY.title, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
-          {collection.name}
-        </div>
-        <div style={{ padding: '18px 18px 20px', borderBottom: HAIR }}>
-          <div style={{ fontSize: TY.caption, color: 'var(--ink-2)', marginBottom: 12 }}>Colour</div>
-          <ColorPicker value={current} onPick={onRecolor}/>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', padding: '0 18px' }}>
-          <button onClick={onRename} style={menuRow}>Rename</button>
-          <button onClick={onDelete} style={{ ...menuRow, color: 'var(--discard)' }}>Delete drawer</button>
-          <button onClick={onClose} style={{ ...menuRow, color: 'var(--ink-2)', borderBottom: 'none' }}>Cancel</button>
-        </div>
+    <Sheet onClose={onClose} zIndex={250}>
+      <div style={{ background: col.bg, color: col.fg, padding: '22px 18px 20px', fontSize: TY.title, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
+        {collection.name}
       </div>
-    </div>
+      <div style={{ ...sheetLabel, borderTop: 'none' }}>COLOUR</div>
+      <ColorPicker value={current} onPick={onRecolor}/>
+      <button onClick={onRename} style={sheetRow}>Rename</button>
+      <button onClick={onDelete} style={{ ...sheetRow, color: 'var(--discard)' }}>Delete drawer</button>
+      <button onClick={onClose} style={{ ...sheetRow, color: 'var(--ink-2)' }}>Cancel</button>
+    </Sheet>
   );
 }
-const menuRow = { textAlign: 'left', padding: '15px 0', fontSize: TY.body, background: 'none', border: 'none', borderBottom: '1px solid var(--line)', cursor: 'pointer' };
 
 // =============== DRAWER (the row pulled out to fill the screen) ===============
 // Whole page in the drawer's colour; a hairline header row, the title, then a numbered list
@@ -468,33 +480,29 @@ function Dialog({ dialog, onClose }) {
   const hasInput = dialog.input !== undefined;
   const can = !hasInput || value.trim().length > 0;
   const ok = () => { if (!can) return; onClose(); dialog.onOk(hasInput ? value.trim() : true, color); };
+  const cell = { flex: 1, minHeight: 56, border: 'none', borderRadius: 0, fontSize: TY.label, cursor: 'pointer', background: 'transparent', color: 'var(--ink)' };
 
   return (
-    <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex: 500, background: 'rgba(34,34,32,0.35)',
-      display: 'flex', alignItems: 'flex-end', animation: 'pgUpIn 0.2s ease both' }}>
-      <div onClick={(e) => e.stopPropagation()} className="safe-bottom" style={{ width: '100%', background: 'var(--cream)',
-        borderRadius: '20px 20px 0 0', padding: '20px 18px 0' }}>
-        <div className="t-serif" style={{ fontSize: TY.title, lineHeight: 1.2, marginBottom: dialog.message ? 8 : 14 }}>{dialog.title}</div>
-        {dialog.message && <div className="t-serif" style={{ fontSize: TY.body, lineHeight: 1.5, color: 'var(--ink-2)', marginBottom: 16 }}>{dialog.message}</div>}
-        {hasInput && (
-          <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={dialog.placeholder || ''}
-            onKeyDown={(e) => { if (e.key === 'Enter') ok(); }}
-            style={{ width: '100%', height: 46, border: 'none', borderBottom: '1px solid var(--ink)', background: 'transparent',
-              outline: 'none', fontFamily: 'var(--serif)', fontSize: TY.body, color: 'var(--ink)', marginBottom: 18 }}/>
-        )}
-        {dialog.color !== undefined && (
-          <div style={{ marginBottom: 22 }}>
-            <div style={{ fontSize: TY.caption, color: 'var(--ink-2)', marginBottom: 12 }}>Colour</div>
-            <ColorPicker value={color} onPick={setColor}/>
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingBottom: 4 }}>
-          <button className="btn-pill" onClick={onClose} style={{ padding: '10px 20px' }}>Cancel</button>
-          <button className="btn-pill solid" onClick={ok} style={{ padding: '10px 22px', opacity: can ? 1 : 0.35,
-            ...(dialog.danger ? { background: 'var(--discard)', borderColor: 'var(--discard)' } : {}) }}>{dialog.okLabel || 'OK'}</button>
-        </div>
+    <Sheet onClose={onClose} zIndex={500}>
+      <div style={{ padding: '22px 18px', fontSize: TY.title, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
+        {dialog.title}
+        {dialog.message && <div style={{ fontSize: TY.body, lineHeight: 1.5, color: 'var(--ink-2)', marginTop: 10, letterSpacing: 0 }}>{dialog.message}</div>}
       </div>
-    </div>
+      {hasInput && (
+        <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={dialog.placeholder || ''}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) ok(); }}
+          style={{ display: 'block', width: '100%', padding: '18px', border: 'none', borderTop: SHEET_LINE, borderRadius: 0,
+            background: 'transparent', fontFamily: 'var(--sans)', fontSize: TY.body, color: 'var(--ink)' }}/>
+      )}
+      {dialog.color !== undefined && <>
+        <div style={sheetLabel}>COLOUR</div>
+        <ColorPicker value={color} onPick={setColor}/>
+      </>}
+      <div style={{ display: 'flex', borderTop: SHEET_LINE }}>
+        <button onClick={onClose} style={{ ...cell, borderRight: SHEET_LINE, color: 'var(--ink-2)' }}>Cancel</button>
+        <button onClick={ok} disabled={!can} style={{ ...cell, background: dialog.danger ? 'var(--discard)' : 'var(--ink)', color: 'var(--cream)', opacity: can ? 1 : 0.35 }}>{dialog.okLabel || 'OK'}</button>
+      </div>
+    </Sheet>
   );
 }
 
