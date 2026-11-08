@@ -2,6 +2,9 @@
 // AI results, queue, captures and decision journal commit together in locus.v1.
 window.LocusImports = (() => {
   const S = window.LocusStore, I = window.LocusImages;
+  // Tasks Home counts as images to continue. Queued ones have their own "to sort" row there.
+  const OPEN_STATES = ['saving','screen','ready','working','done','error','save-error'];
+  const UNFINISHED_STATES = [...OPEN_STATES,'queued'];
   const uid = p => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`;
   let running = null;
   const scans = new Set();
@@ -79,34 +82,30 @@ window.LocusImports = (() => {
     }
     if(patches.size || ledger(d).batches.some(b=>b.receiving)) change(current=>({...current,imports:{...current.imports,tasks:current.imports.tasks.map(t=>patches.has(t.id) ? {...t,...patches.get(t.id)} : t),batches:current.imports.batches.map(b=>b.receiving && !scans.has(b.id) ? {...b,receiving:false} : b)}}));
   }
-  function screen(id,keep) {
-    change(d=>{
-      const task=d.imports.tasks.find(t=>t.id===id);
-      if(!task || task.state!=='screen')return d;
-      return {...d,imports:{...d.imports,screenHintSeen:true,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:keep ? 'ready' : 'skipped',screened:true,decidedAt:Date.now()} : t),batches:d.imports.batches.map(b=>b.id===task.batchId ? {...b,screenHistory:[...(b.screenHistory || []),id]} : b)}};
-    });
+  // Review choices can be changed at any time before AI runs, so these accept a photo in any review state.
+  const REVIEWABLE=['screen','ready','skipped','error'];
+  function reviewed(d,id,patch) {
+    const task=d.imports.tasks.find(t=>t.id===id);
+    if(!task || !REVIEWABLE.includes(task.state))return d;
+    return {...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,...patch(t),screened:true,decidedAt:Date.now()} : t)}};
   }
-  function undoScreen(batchId) {
-    change(d=>{
-      const batch=d.imports.batches.find(b=>b.id===batchId);if(!batch)return d;
-      const history=[...(batch.screenHistory || [])];let task;
-      while(history.length){const id=history.pop();task=d.imports.tasks.find(t=>t.id===id && ['ready','skipped'].includes(t.state));if(task)break;}
-      return {...d,imports:{...d.imports,tasks:task ? d.imports.tasks.map(t=>t.id===task.id ? {...t,state:'screen',screened:false} : t) : d.imports.tasks,batches:d.imports.batches.map(b=>b.id===batchId ? {...b,screenHistory:history} : b)}};
-    });
-  }
+  const keptState=t=>(t.state==='error' ? 'error' : 'ready');
+  function choose(id,keep) { change(d=>reviewed(d,id,t=>({state:keep ? keptState(t) : 'skipped',clipped:false}))); }
+  // clipped: this photo belongs to the same post as the photo kept before it
+  function setClipped(id,clipped) { change(d=>reviewed(d,id,t=>({state:keptState(t),clipped}))); }
   function rescreen(id) {
-    change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id && t.state==='skipped' ? {...t,state:'screen',screened:false} : t),batches:d.imports.batches.map(b=>({...b,screenHistory:(b.screenHistory || []).filter(x=>x!==id)}))}}));
+    change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id && t.state==='skipped' ? {...t,state:'screen',screened:false} : t)}}));
   }
   function updateItem(id,patch) {
-    const allowed=['title','summary','tags','note','aiGuess'];
+    const allowed=['title','summary','tags','note','aiGuess','suggestedDrawer'];
     const safe=Object.fromEntries(allowed.filter(k=>k in patch).map(k=>[k,patch[k]]));
-    change(d=>({...d,queue:d.queue.map(item=>item.id===id ? {...item,...safe} : item)}));
+    change(d=>({...d,queue:d.queue.map(item=>item.id===id ? {...item,...safe,updatedAt:Date.now()} : item)}));
   }
   async function run(batchId) {
     if(ledger(snapshot()).tasks.some(t=>t.batchId===batchId && ['screen','saving'].includes(t.state))) throw Error('Review your photos before organizing them.');
     if(ledger(snapshot()).tasks.some(t=>t.batchId===batchId && t.state==='ready' && !t.screened)) throw Error('Review your photos before organizing them.');
     if(running) throw Error('Another batch is still finishing. Please wait.');
-    if(!window.LocusAI.isReady()) throw Error('Add your Qianwen API key in Settings first.');
+    if(!window.LocusAI.isReady()) throw Error('Add your AI key in Settings first.');
     const control={batchId,paused:false};running=control;
     const work=async()=>{
       updateBatch(batchId,{paused:false});
@@ -142,6 +141,20 @@ window.LocusImports = (() => {
     if(running?.batchId===batchId) running.paused=true;
     updateBatch(batchId,{paused:true});
   }
+  // A finished AI result, as an item waiting to be confirmed.
+  function queueItemFromTask(t,batch,d) {
+    const r=t.result;
+    return {
+      id:t.id, taskId:t.id, batchId:t.batchId, imageId:t.imageId,
+      glyph:r.emoji, source:r.source || 'Screenshot',
+      title:r.title, summary:r.summary, text:r.text || r.summary, tags:r.tags,
+      kind:r.kind || null, details:r.details || [],
+      aiGuess:d.collections.find(c=>c.id===batch.targetId)?.name || batch.targetName || r.collection,
+      aiIsNew:batch.targetId ? false : r.isNew,
+      aiConfidence:batch.targetId ? 100 : r.confidence,
+      addedAt:Date.now(),
+    };
+  }
   function review(batchId) {
     let count=0;
     change(d=>{
@@ -149,7 +162,7 @@ window.LocusImports = (() => {
       if(!batch) throw Error('Import batch was not found.');
       const done=d.imports.tasks.filter(t=>t.batchId===batchId && t.state==='done');
       const ids=new Set(done.map(t=>t.id));count=done.length;
-      const items=done.map(t=>{const r=t.result;return {id:t.id,taskId:t.id,batchId,imageId:t.imageId,glyph:r.emoji,source:r.source || 'Screenshot',title:r.title,summary:r.summary,text:r.text || r.summary,tags:r.tags,aiGuess:(d.collections.find(c=>c.id===batch.targetId)?.name || batch.targetName || r.collection),aiIsNew:batch.targetId ? false : r.isNew,aiConfidence:batch.targetId ? 100 : r.confidence,addedAt:Date.now()};});
+      const items=done.map(t=>queueItemFromTask(t,batch,d));
       return {...d,queue:[...d.queue,...items.filter(item=>!d.queue.some(q=>q.id===item.id))],imports:{...d.imports,tasks:d.imports.tasks.map(t=>ids.has(t.id) ? {...t,state:'queued'} : t)}};
     });return count;
   }
@@ -202,11 +215,55 @@ window.LocusImports = (() => {
     for (const k of keys) if (!used.has(k) && !I.isFresh(k)) { await I.remove(k); orphans++; }
     return { cleared: old.length, orphans };
   }
-  function makeCollection(name,cols) {
-    const base=name.toLowerCase().replace(/[^a-z0-9一-鿿]+/g,'-').replace(/^-|-$/g,'') || 'drawer';
-    let id=base,n=2;while(cols.some(c=>c.id===id))id=`${base}-${n++}`;
-    return {id,name,color:window.LocusTheme.nextColor(cols),tags:[],glyph:'◌',vibe:''};
+  // A confirmed queue item, as a saved capture in drawer col.
+  function captureFromItem(item,col) {
+    return {
+      id:`cap_${item.id}`, collection:col.id,
+      title:window.LocusTheme.shortTitle(item.title || item.text || 'Untitled capture'),
+      glyph:item.glyph, tags:item.tags || [], source:item.source,
+      summary:item.summary || item.text || '', text:item.text || '',
+      kind:item.kind || null, details:item.details || [], imageId:item.imageId,
+      date:window.LocusTheme.formatDate(), addedAt:Date.now(),
+      note:item.note || '', importTaskId:item.taskId,
+    };
   }
+  // What saving one screenshot changed in its drawer's tag list, so Undo can put it back.
+  function tagChangeBetween(before,after) {
+    const missing=(a=[],b=[])=>a.filter(t=>!b.includes(t));
+    return {
+      drawerId:before.id,
+      added:missing(after.tags,before.tags), removed:missing(before.tags,after.tags),
+      ownAdded:missing(after.userTags,before.userTags), ownRemoved:missing(before.userTags,after.userTags),
+    };
+  }
+  function undoTagChange(c,change,captures) {
+    const inDrawer=captures.filter(x=>x.collection===c.id);
+    const carried=t=>inDrawer.some(x=>(x.tags || []).includes(t));
+    const tags=[...change.removed,...(c.tags || []).filter(t=>!change.added.includes(t) || carried(t))];
+    const userTags=[...change.ownRemoved,...(c.userTags || []).filter(t=>!change.ownAdded.includes(t))];
+    return window.LocusAI.addDrawerTags({...c,tags,userTags},[],[]); // also keeps the drawer within its tag limit
+  }
+  // The undo history lives in the same limited storage as everything else, so only recent "keep" decisions
+  // stay undoable. "Skip" decisions all stay: Restore to sorting needs them, and they clear themselves after CLEAN_DAYS.
+  const UNDO_PER_BATCH = 20, UNDO_TOTAL = 200;
+  function trimJournal(journal) {
+    const perBatch = new Map();
+    let total = 0;
+    const kept = [];
+    for (let i = journal.length - 1; i >= 0; i--) {
+      const x = journal[i], batch = x.item?.batchId;
+      if (x.action !== 'discard') {
+        const n = perBatch.get(batch) || 0;
+        if (n >= UNDO_PER_BATCH || total >= UNDO_TOTAL) continue;
+        perBatch.set(batch, n + 1);
+        total++;
+      }
+      kept.unshift(x);
+    }
+    return kept;
+  }
+  // Once a photo is decided, its full AI result is already saved elsewhere. Keep only what is still read.
+  const slimDecided = t => (['kept','discarded'].includes(t.state) && t.result ? {...t,result:{title:t.result.title,tags:t.result.tags}} : t);
   function decide(decisions) {
     let kept=0,discarded=0;
     change(d=>{
@@ -214,19 +271,23 @@ window.LocusImports = (() => {
       for(const decision of decisions) {
         const item=queue.find(q=>q.id===decision.item.id);
         if(!item)continue; // Repeated callbacks are harmless.
-        let capture=null,createdCollection=null;
+        let capture=null,createdCollection=null,tagChange=null;
         if(decision.action!=='discard') {
           let col=cols.find(c=>c.name===decision.collection);
-          if(!col){col=makeCollection(decision.collection || 'Unsorted',cols);cols.push(col);createdCollection=col.id;}
-          capture={id:`cap_${item.id}`,collection:col.id,title:window.LocusTheme.shortTitle(item.title || item.text || 'Untitled capture'),glyph:item.glyph,tags:item.tags || [],source:item.source,summary:item.summary || item.text || '',imageId:item.imageId,date:new Date().toLocaleDateString('en-US',{month:'short',day:'2-digit',year:'numeric'}),addedAt:Date.now(),note:item.note || '',importTaskId:item.taskId};
+          if(!col){col=S.makeCollection(decision.collection || 'Unsorted',cols);cols.push(col);createdCollection=col.id;}
+          capture=captureFromItem(item,col);
           caps=[capture,...caps.filter(c=>c.id!==capture.id)];
-          cols=cols.map(c=>c.id===col.id ? {...c,tags:[...new Set([...(c.tags || []),...(item.tags || [])])]} : c);kept++;
+          const aiTags=tasks.find(t=>t.id===item.taskId)?.result?.tags || item.tags || [];
+          const ownTags=(item.tags || []).filter(t=>!aiTags.includes(t)); // added by hand during review
+          const before=cols.find(c=>c.id===col.id), after=window.LocusAI.addDrawerTags(before,item.tags || [],ownTags);
+          tagChange=tagChangeBetween(before,after);
+          cols=cols.map(c=>c.id===col.id ? after : c);kept++;
         } else discarded++;
-        journal.push({id:uid('decision'),item,action:decision.action,collection:decision.collection,captureId:capture?.id,createdCollection,at:Date.now()});
+        journal.push({id:uid('decision'),item,action:decision.action,collection:decision.collection,captureId:capture?.id,createdCollection,tagChange,at:Date.now()});
         queue=queue.filter(q=>q.id!==item.id);
         tasks=tasks.map(t=>t.id===item.taskId ? {...t,state:capture ? 'kept' : 'discarded',captureId:capture?.id,decidedAt:Date.now()} : t);
       }
-      return {...d,collections:cols,captures:caps,queue,imports:{...d.imports,tasks,decisions:journal}};
+      return {...d,collections:cols,captures:caps,queue,imports:{...d.imports,tasks:tasks.map(slimDecided),decisions:trimJournal(journal)}};
     });return {kept,discarded};
   }
   function undo(batchId) {
@@ -236,9 +297,17 @@ window.LocusImports = (() => {
       while(index>=0 && batchId && journal[index].item.batchId!==batchId)index--;
       if(index<0)return d;
       const [last]=journal.splice(index,1);
+      const saved=d.captures.find(c=>c.id===last.captureId);
       const caps=d.captures.filter(c=>c.id!==last.captureId);
-      const cols=d.collections.filter(c=>!(c.id===last.createdCollection && !caps.some(x=>x.collection===c.id)));
-      return {...d,collections:cols,captures:caps,queue:[last.item,...d.queue.filter(q=>q.id!==last.item.id)],imports:{...d.imports,decisions:journal,tasks:d.imports.tasks.map(t=>t.id===last.item.taskId ? {...t,state:'queued',captureId:null} : t)}};
+      // changes made after saving come back with it, so undoing never loses a note or a new title
+      const item=saved?.updatedAt ? {
+        ...last.item, title:saved.title, summary:saved.summary, tags:saved.tags, note:saved.note,
+        aiGuess:d.collections.find(c=>c.id===saved.collection)?.name || last.item.aiGuess,
+      } : last.item;
+      const cols=d.collections
+        .filter(c=>!(c.id===last.createdCollection && !caps.some(x=>x.collection===c.id)))
+        .map(c=>c.id===last.tagChange?.drawerId ? window.LocusAI.dropUnusedOwnTags(undoTagChange(c,last.tagChange,caps),caps) : c);
+      return {...d,collections:cols,captures:caps,queue:[item,...d.queue.filter(q=>q.id!==last.item.id)],imports:{...d.imports,decisions:journal,tasks:d.imports.tasks.map(t=>t.id===last.item.taskId ? {...t,state:'queued',captureId:null} : t)}};
     });
   }
   function restore(id) {
@@ -250,5 +319,5 @@ window.LocusImports = (() => {
       return {...d,queue:[...d.queue,last.item],imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:'queued'} : t),decisions:d.imports.decisions.filter(x=>x.item.taskId!==id)}};
     });
   }
-  return {snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,screen,undoScreen,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
+  return {OPEN_STATES,UNFINISHED_STATES,snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,choose,setClipped,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
 })();

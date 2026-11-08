@@ -29,6 +29,59 @@ window.LocusStore = (() => {
     return data;
   }
   function update(fn) { return save(fn(load())); }
+
+  function makeCollection(name, existing) {
+    const slug = name.toLowerCase().replace(/[^a-z0-9一-鿿]+/g, '-').replace(/^-|-$/g, '') || 'drawer';
+    let id = slug, n = 2;
+    while (existing.some(c => c.id === id)) id = `${slug}-${n++}`;
+    return { id, name, color: window.LocusTheme.nextColor(existing), glyph: '◌', vibe: '', tags: [] };
+  }
+
+  // Browsers that saved older samples get the new wording once. Only samples nobody has edited change, and a
+  // sample keeps the drawer it was moved to and its note. Deleted samples stay deleted; the person's own captures are not touched.
+  function refreshSamples(data) {
+    const demo = window.LOCUS_DATA;
+    if (data.sampleVersion === demo.sampleVersion) return data;
+    const wording = ({ title, summary, text, tags, details, kind, glyph, source }) => ({ title, summary, text, tags, details, kind, glyph, source });
+    const samples = new Map(demo.captures.map(c => [c.id, wording(c)]));
+    const queued = new Map(demo.triageQueue.map(q => [q.id, wording(q)]));
+    demo.triageQueue.forEach(q => samples.set(`cap_${q.id}`, wording({ ...q, summary: q.text })));
+    const captures = data.captures.map(c => samples.has(c.id) && !c.updatedAt ? { ...c, ...samples.get(c.id) } : c);
+    const queue = (data.queue || []).map(q => queued.has(q.id) && !q.updatedAt ? { ...q, ...queued.get(q.id) } : q);
+    // Sample drawers rebuild their tag row, so the old sample tags do not linger.
+    const sampleDrawers = new Set(demo.collections.map(c => c.id));
+    const collections = data.collections.map(c => {
+      if (!sampleDrawers.has(c.id)) return c;
+      const used = captures.filter(x => x.collection === c.id).reverse().flatMap(x => x.tags || []);
+      return window.LocusAI.addDrawerTags({ ...c, tags: [] }, [...used, ...(c.userTags || [])], c.userTags || []);
+    });
+    return { ...data, captures, queue, collections, sampleVersion: demo.sampleVersion };
+  }
+
+  // Order of a drawer's list. The choice is remembered on this device and also drives Previous / Next.
+  const SORTS = [
+    { id: 'newest', label: 'Newest' },
+    { id: 'oldest', label: 'Oldest' },
+    { id: 'edited', label: 'Edited' },
+    { id: 'title', label: 'A–Z' },
+  ];
+  const SORT_KEY = 'locus.sort';
+  function getSort() {
+    try { const s = localStorage.getItem(SORT_KEY); return SORTS.some(x => x.id === s) ? s : 'newest'; }
+    catch (e) { return 'newest'; }
+  }
+  function setSort(id) { try { localStorage.setItem(SORT_KEY, id); } catch (e) {} }
+  const addedTime = c => c.addedAt || Date.parse(c.date) || 0;
+  function sortCaptures(list, sort = getSort()) {
+    const by = {
+      newest: (a, b) => addedTime(b) - addedTime(a),
+      oldest: (a, b) => addedTime(a) - addedTime(b),
+      edited: (a, b) => (b.updatedAt || addedTime(b)) - (a.updatedAt || addedTime(a)),
+      title: (a, b) => String(a.title).localeCompare(String(b.title), 'zh-Hans-CN', { numeric: true }),
+    }[sort] || (() => 0);
+    return [...list].sort(by);
+  }
+
   function subscribe(fn) {
     const storage = e => { if(e.key === KEY) fn(); };
     window.addEventListener('locus:store',fn);
@@ -42,7 +95,7 @@ window.LocusStore = (() => {
 
   // One Markdown file: a heading per collection, a section per capture.
   // Tags become #tags so the file works well in Obsidian / Bear / Notion import.
-  function toMarkdown({ collections, captures }, imagePaths = {}) {
+  function toMarkdown({ collections, captures }) {
     const n = new Date(), today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
     const tag = (t) => '#' + String(t).trim().replace(/\s+/g, '-');
     const lines = [
@@ -67,7 +120,8 @@ window.LocusStore = (() => {
         if (meta.length) lines.push(meta.join(' · '), '');
         const body = c.kind === 'note' ? (c.text || c.summary) : c.summary;
         if (body) lines.push(body, '');
-        (imagePaths[c.id] || []).forEach((src, i) => lines.push(`![${(c.title || 'Image').replace(/[\[\]]/g, '')}${i ? ' ' + (i + 1) : ''}](${src})`, ''));
+        (c.details || []).forEach((d) => { const v = String(d.value).split('\n').filter(Boolean); lines.push(v.length > 1 ? `- **${d.label}:**\n${v.map((x) => `  - ${x}`).join('\n')}` : `- **${d.label}:** ${v[0] || ''}`); });
+        if (c.details?.length) lines.push('');
         if (c.note) lines.push(`> **My note:** ${c.note.replace(/\n/g, '\n> ')}`, '');
         if (c.tags && c.tags.length) lines.push(c.tags.map(tag).join(' '), '');
       });
@@ -75,49 +129,11 @@ window.LocusStore = (() => {
     const orphans = captures.filter((c) => !collections.some((col) => col.id === c.collection));
     if (orphans.length) {
       lines.push('## Unsorted', '');
-      orphans.forEach((c) => { lines.push(`### ${c.title}`, '', c.summary || '', ''); (imagePaths[c.id] || []).forEach((src) => lines.push(`![](${src})`, '')); });
+      orphans.forEach((c) => { lines.push(`### ${c.title}`, '', c.summary || '', ''); });
     }
     return lines.join('\n');
   }
 
-  // ---- export with images: a .zip holding folio.md plus an images/ folder the file links to ----
-  const crcTable = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
-  const crc32 = (b) => { let c = 0xffffffff; for (let i = 0; i < b.length; i++) c = crcTable[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-  // Minimal zip writer (stored, no compression: the images are already JPEG). UTF-8 names.
-  function makeZip(files) {
-    const enc = new TextEncoder(), parts = [], central = [];
-    let offset = 0;
-    const now = new Date();
-    const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
-    const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
-    for (const f of files) {
-      const name = enc.encode(f.name), data = f.bytes, crc = crc32(data);
-      const local = new DataView(new ArrayBuffer(30));
-      local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true); local.setUint16(6, 0x0800, true);
-      local.setUint16(8, 0, true); local.setUint16(10, time, true); local.setUint16(12, date, true);
-      local.setUint32(14, crc, true); local.setUint32(18, data.length, true); local.setUint32(22, data.length, true);
-      local.setUint16(26, name.length, true); local.setUint16(28, 0, true);
-      parts.push(local.buffer, name, data);
-      const cen = new DataView(new ArrayBuffer(46));
-      cen.setUint32(0, 0x02014b50, true); cen.setUint16(4, 20, true); cen.setUint16(6, 20, true); cen.setUint16(8, 0x0800, true);
-      cen.setUint16(10, 0, true); cen.setUint16(12, time, true); cen.setUint16(14, date, true);
-      cen.setUint32(16, crc, true); cen.setUint32(20, data.length, true); cen.setUint32(24, data.length, true);
-      cen.setUint16(28, name.length, true); cen.setUint32(42, offset, true);
-      central.push(cen.buffer, name);
-      offset += 30 + name.length + data.length;
-    }
-    const size = central.reduce((n, p) => n + (p.byteLength ?? p.length), 0);
-    const end = new DataView(new ArrayBuffer(22));
-    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
-    end.setUint32(12, size, true); end.setUint32(16, offset, true);
-    return new Blob([...parts, ...central, end.buffer], { type: 'application/zip' });
-  }
-  const dataUrlBytes = (url) => {
-    const [head, b64] = url.split(',');
-    const bin = atob(b64), out = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-    return { bytes: out, ext: /png/.test(head) ? 'png' : /webp/.test(head) ? 'webp' : /gif/.test(head) ? 'gif' : 'jpg' };
-  };
   function saveFile(blob, filename) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -126,41 +142,20 @@ window.LocusStore = (() => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  // Exports everything. With images: folio-DATE.zip (folio.md + images/). With none: folio-DATE.md.
-  async function exportAll(data) {
+  // Text only: for reading or moving into another notes app. Back up everything (backup.js) is what keeps the images.
+  function exportMarkdown(data) {
     const n = new Date(), day = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-    const files = [], imagePaths = {};
-    for (const c of data.captures) {
-      const ids = [...new Set([c.imageId, ...(c.imageIds || [])].filter(Boolean))];
-      for (const id of ids) {
-        const url = await window.LocusImages.get(id);
-        if (!url || !url.startsWith('data:')) continue;
-        const { bytes, ext } = dataUrlBytes(url);
-        const path = `images/${String(c.id).replace(/[^a-zA-Z0-9_-]/g, '_')}-${(imagePaths[c.id] || []).length + 1}.${ext}`;
-        files.push({ name: path, bytes });
-        (imagePaths[c.id] = imagePaths[c.id] || []).push(path);
-      }
-    }
-    const md = toMarkdown(data, imagePaths);
-    if (!files.length) { saveFile(new Blob([md], { type: 'text/markdown;charset=utf-8' }), `folio-${day}.md`); return { captures: data.captures.length, images: 0 }; }
-    files.unshift({ name: 'folio.md', bytes: new TextEncoder().encode(md) });
-    saveFile(makeZip(files), `folio-${day}.zip`);
-    return { captures: data.captures.length, images: files.length - 1 };
+    saveFile(new Blob([toMarkdown(data)], { type: 'text/markdown;charset=utf-8' }), `folio-${day}.md`);
+    return { captures: data.captures.length };
   }
 
-  function downloadMarkdown(data) {
-    const md = toMarkdown(data);
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `folio-${new Date().toISOString().slice(0, 10)}.md`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    return data.captures.length;
+  // Ask the browser not to clear saved data by itself. It may say no, so a backup is still the real safety net.
+  async function askToKeepData() {
+    try { return !!(await navigator.storage?.persist?.()); } catch (e) { return false; }
+  }
+  async function isDataKept() {
+    try { return !!(await navigator.storage?.persisted?.()); } catch (e) { return false; }
   }
 
-  return { load, save, update, subscribe, clear, toMarkdown, downloadMarkdown, exportAll };
+  return { load, save, update, subscribe, clear, toMarkdown, exportMarkdown, saveFile, askToKeepData, isDataKept, refreshSamples, makeCollection, SORTS, getSort, setSort, sortCaptures };
 })();

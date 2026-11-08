@@ -3,36 +3,22 @@
 :root {
   --cream: #f8f5f0;
   --paper: #fdfbf7;
+  --band: #f0ebe2; /* linen: the background of section heading rows on cream pages */
   --ink: #222220;
   --ink-2: #6b665d;
   --ink-3: #a29c91;
   --line: rgba(29, 28, 26, 0.14);
 
-  /* type scale: title 28 · body 17 · label 15 · caption 13 (keep in sync with LocusTheme.TYPE) */
-  --t-title: 28px;
+  /* the two sizes the stylesheet uses; every size on screen comes from LocusTheme.TYPE */
   --t-body: 17px;
   --t-label: 15px;
-  --t-caption: 13px;
 
   /* one typeface everywhere; --serif kept as a name so older styles still resolve */
   /* Helvetica Neue is built into iPhone and Mac; Inter Tight is the look-alike everywhere else */
   --sans: 'Helvetica Neue', 'Inter Tight', Helvetica, Arial, 'PingFang SC', 'Hiragino Sans GB', sans-serif;
   --serif: var(--sans);
 
-  /* names the older screens still use, mapped onto the new palette */
-  --bg: var(--cream);
-  --fg: var(--ink);
-  --silver: var(--ink-2);
-  --silver-dim: var(--ink-3);
-  --silver-faint: var(--line);
-  --accent: var(--ink);
-  --accent-dim: rgba(29, 28, 26, 0.35);
-  --accent-faint: rgba(29, 28, 26, 0.06);
-  --card: var(--paper);
-  --card-border: var(--line);
-  --confirm: #3f7a4c;
   --discard: #c2452a;
-  --mono: var(--sans);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -94,19 +80,6 @@ button, input, textarea, select { font: inherit; color: inherit; }
 @keyframes softIn { from { opacity: 0; } to { opacity: 1; } }
 .soft-in { animation: softIn 0.2s ease-out both; }
 
-/* === type === */
-.t-serif { font-family: var(--serif); }
-.t-sans, .t-mono { font-family: var(--sans); }
-.t-eyebrow {
-  font-family: var(--sans); font-size: var(--t-caption); color: var(--ink-2);
-  letter-spacing: 0.08em; text-transform: uppercase;
-}
-.t-accent { color: var(--ink); }
-.t-silver { color: var(--ink-2); }
-.t-dim { color: var(--ink-3); }
-.quote::before { content: '\201C'; }
-.quote::after { content: '\201D'; }
-
 /* === toast === */
 .toast-host {
   position: absolute; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 0; right: 0;
@@ -120,11 +93,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
   width: 100%; min-height: 52px; padding: 0 18px; border-radius: 0; /* sits exactly over the header row */
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
   animation: toastIn 0.34s cubic-bezier(0.2,0.8,0.2,1) both;
-  pointer-events: auto;
 }
 .toast.exit { animation: toastOut 0.28s ease both; }
-.toast .dot { display: none; }
 .toast button {
+  pointer-events: auto; /* only a real button catches taps; otherwise the header underneath stays usable */
   background: none; border: none; color: var(--cream);
   font-family: var(--sans); font-size: var(--t-label); cursor: pointer;
   text-decoration: underline; text-underline-offset: 3px; padding: 0;
@@ -138,46 +110,7 @@ button, input, textarea, select { font: inherit; color: inherit; }
 .scroll-y { overflow-y: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .scroll-y::-webkit-scrollbar { display: none; }
 
-/* === buttons === */
-.btn-pill {
-  font-family: var(--sans); font-size: var(--t-label);
-  color: var(--ink); background: transparent;
-  border: 1px solid var(--ink);
-  padding: 7px 14px; border-radius: 999px;
-  cursor: pointer; transition: background 0.2s, color 0.2s;
-}
-.btn-pill.accent, .btn-pill.solid { background: var(--ink); color: var(--cream); }
-.btn-text {
-  font-family: var(--sans); font-size: var(--t-caption); font-weight: 400;
-  background: none; border: none; cursor: pointer; color: inherit;
-  text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px;
-  padding: 6px 0;
-}
-.btn-icon {
-  width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
-  background: transparent; border: none; border-radius: 50%;
-  color: var(--ink); cursor: pointer;
-}
-.btn-icon svg { width: 20px; height: 20px; }
-
-/* === chips === */
-.chip {
-  font-family: var(--sans); font-size: var(--t-caption); color: var(--ink-2);
-  border: 1px solid var(--line);
-  padding: 3px 10px; background: transparent; border-radius: 99px;
-  white-space: nowrap;
-}
-.chip.accent { color: var(--ink); border-color: var(--ink); }
-
 .hl { background: rgba(242, 201, 76, 0.45); padding: 0 1px; border-radius: 2px; }
-
-.shimmer {
-  background: linear-gradient(90deg, rgba(246,242,234,0) 0%, rgba(246,242,234,0.7) 50%, rgba(246,242,234,0) 100%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-}
-@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
 /* === launch: Locus typed on cream === */
 /* each letter pops up from slightly below and settles, like a key striking paper */

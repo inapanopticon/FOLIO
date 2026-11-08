@@ -5,7 +5,26 @@ window.LocusImages = (() => {
   const DB = 'locus-images';
   const STORE = 'images';
   let dbPromise = null;
-  const cache = new Map(); // id -> dataURL
+  // Recently used images, so scrolling back is instant. Capped: long screenshots are several MB each, and a
+  // phone closes the page if they pile up. Older ones are simply read from storage again.
+  const CACHE_MAX_CHARS = 40e6;
+  const cache = new Map(); // id -> dataURL, oldest first
+  let cacheChars = 0;
+  function forget(id) {
+    const v = cache.get(id);
+    if (v === undefined) return;
+    cacheChars -= v.length;
+    cache.delete(id);
+  }
+  function remember(id, dataUrl) {
+    forget(id);
+    cache.set(id, dataUrl);
+    cacheChars += dataUrl.length;
+    for (const k of cache.keys()) {
+      if (cacheChars <= CACHE_MAX_CHARS || k === id) break;
+      forget(k);
+    }
+  }
   const fresh = new Set(); // saved during this visit: never treated as leftovers (a note may not be committed yet)
 
   function open() {
@@ -32,23 +51,23 @@ window.LocusImages = (() => {
   }
 
   async function put(id, dataUrl, strict = false) {
-    cache.set(id, dataUrl); fresh.add(id);
-    try { await tx('readwrite', (s) => s.put(dataUrl, id)); } catch (e) { cache.delete(id); if (strict) throw e; console.warn('image save failed', e); }
+    remember(id, dataUrl); fresh.add(id);
+    try { await tx('readwrite', (s) => s.put(dataUrl, id)); } catch (e) { forget(id); if (strict) throw e; console.warn('image save failed', e); }
   }
 
   async function get(id) {
     if (!id) return null;
-    if (cache.has(id)) return cache.get(id);
+    if (cache.has(id)) { const hit = cache.get(id); remember(id, hit); return hit; }
     try {
       const v = await tx('readonly', (s) => s.get(id));
-      if (v) cache.set(id, v);
+      if (v) remember(id, v);
       return v || null;
     } catch (e) { return null; }
   }
 
   async function remove(id) {
     if (!id) return;
-    cache.delete(id);
+    forget(id);
     try { await tx('readwrite', (s) => s.delete(id)); } catch (e) {}
   }
 
@@ -59,7 +78,10 @@ window.LocusImages = (() => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        const scale = Math.min(1, max / Math.max(img.width, img.height));
+        // Long screenshots (a whole post or article) would become unreadably narrow if only the long
+        // side were limited, so those keep a readable width and may be much taller.
+        const long = Math.max(img.width, img.height), short = Math.min(img.width, img.height);
+        const scale = long / short > 2.5 ? Math.min(1, 1100 / short, 8000 / long) : Math.min(1, max / long);
         const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
         const c = document.createElement('canvas');
         c.width = w; c.height = h;

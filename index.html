@@ -13,7 +13,8 @@
 <title>Folio</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
+<!-- loaded without holding up the page: on networks that block Google the app still opens at once -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
 <link rel="stylesheet" href="css/app.css">
 
 <script src="vendor/react.development.js"></script>
@@ -26,17 +27,26 @@
 <script src="src/images.js"></script>
 <script src="src/ai.js"></script>
 <script src="src/imports.js"></script>
+<script src="src/actions.js"></script>
+<script src="src/backup.js"></script>
 </head>
 <body>
 
 <div id="root"></div>
 
-<script type="text/babel" src="src/live.jsx"></script>
-<script type="text/babel" src="src/screens.jsx"></script>
-<script type="text/babel" src="src/screens2.jsx"></script>
-<script type="text/babel" src="src/triage.jsx"></script>
-<script type="text/babel" src="src/icons.jsx"></script>
-<script type="text/babel" src="src/v2.jsx"></script>
+<script type="text/babel" src="src/shared.jsx"></script>
+<script type="text/babel" src="src/router.jsx"></script>
+<script type="text/babel" src="src/screens/home.jsx"></script>
+<script type="text/babel" src="src/screens/drawer.jsx"></script>
+<script type="text/babel" src="src/screens/detail.jsx"></script>
+<script type="text/babel" src="src/screens/edit.jsx"></script>
+<script type="text/babel" src="src/screens/search.jsx"></script>
+<script type="text/babel" src="src/screens/write.jsx"></script>
+<script type="text/babel" src="src/screens/sheets.jsx"></script>
+<script type="text/babel" src="src/screens/settings.jsx"></script>
+<script type="text/babel" src="src/screens/import.jsx"></script>
+<script type="text/babel" src="src/screens/import-review.jsx"></script>
+<script type="text/babel" src="src/screens/import-confirm.jsx"></script>
 <script type="text/babel" src="src/app.jsx"></script>
 
 </body></html>

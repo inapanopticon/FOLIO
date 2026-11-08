@@ -46,5 +46,9 @@ window.LocusTheme = (() => {
     const chars = Array.from((value || '').trim());
     return chars.length > TITLE_MAX ? chars.slice(0, TITLE_MAX - 1).join('') + '…' : chars.join('');
   };
-  return { PALETTE, colorOf, nextColor, TYPE, TITLE_MAX, titleLength, shortTitle };
+  // The thin line between cells on a page in a drawer's colour.
+  const hairline = (fg) => `1px solid color-mix(in srgb, ${fg} 28%, transparent)`;
+  const formatDate = (time = Date.now()) => new Date(time).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+
+  return { PALETTE, colorOf, nextColor, TYPE, TITLE_MAX, titleLength, shortTitle, hairline, formatDate };
 })();
