@@ -14,6 +14,8 @@ function WriteScreen({ collections, defaultCollectionId, onCancel, onSave }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const fileRef = useRef();
+  const [leaving, setLeaving] = useState(false);
+  const cancel = () => (title.trim() || text.trim() || tags.length || newTag.trim() || images.length ? setLeaving(true) : onCancel());
   const addImages = async files => {
     setError(''); setReadingImages(true);
     try {
@@ -61,7 +63,7 @@ function WriteScreen({ collections, defaultCollectionId, onCancel, onSave }) {
       <div className="content">
         <StatusBar/>
         <div style={headerBar(HAIR)}>
-          <button onClick={onCancel} style={{ ...nav, borderRight: HAIR }}>Cancel</button>
+          <button onClick={cancel} style={{ ...nav, borderRight: HAIR }}>Cancel</button>
           <div style={{ flex: 1, display: 'grid', placeItems: 'center', fontSize: TY.caption, letterSpacing: '0.12em' }}>WRITE</div>
           <button disabled={!can} onClick={save}
             style={{ ...nav, borderLeft: HAIR, background: col.bg, color: col.fg, cursor: can ? 'pointer' : 'default' }}><span style={{ opacity: can ? 1 : 0.4 }}>{saving ? 'Saving…' : 'Save'}</span></button>
@@ -114,6 +116,7 @@ function WriteScreen({ collections, defaultCollectionId, onCancel, onSave }) {
           </select>
         </div>
       </div>
+      {leaving && <Dialog key="leave-write" dialog={{ message: "What you've written won't be saved.", okLabel: 'Discard note', danger: true, onOk: () => onCancel() }} onClose={() => setLeaving(false)}/>}
       <style>{`.write-screen input::placeholder { font-size: ${TY.caption}px; color: var(--ink-2); opacity: 0.65; }
         .write-screen textarea::placeholder { color: var(--ink-2); opacity: 0.65; }
         .write-screen textarea, .write-screen select { outline: none; }`}</style>

@@ -17,9 +17,10 @@ function HeaderCell({ onClick, label, children }) {
 
 // =============== LAUNCH ===============
 // Cream screen; "Folio" is typed letter by letter with an uneven, hand-typed rhythm, holds a beat,
-// then shrinks and glides into the home header's "Folio", which it replaces. About one second.
+// then shrinks and glides into the home header's "Folio", which it replaces. About 1.6 seconds.
 const LAUNCH_LETTERS = [0, 0.1, 0.2, 0.33, 0.42];  // when each letter lands (s): F … o l … i o
-const LAUNCH_GLIDE_AT = 620, LAUNCH_GLIDE_MS = 340;
+// The last letter settles at 0.68s, so gliding at 1.12s leaves the whole word still for about 0.45s.
+const LAUNCH_GLIDE_AT = 1120, LAUNCH_GLIDE_MS = 340;
 
 function LaunchWordmark({ onDone }) {
   const wordRef = useRef(null);
@@ -107,7 +108,8 @@ function SwipeRow({ open, onOpenChange, onTap, onLongPress, onEdit, onDelete, ro
       <div ref={rowRef}
         onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
         onContextMenu={(e) => { e.preventDefault(); clear(); st.current = null; onLongPress(); }}
-        style={{ ...rowStyle, position: 'relative', touchAction: 'pan-y', transform: `translateX(${x}px)`,
+        // only while swiping: a resting transform can round a pixel differently from the rows around it
+        style={{ ...rowStyle, position: 'relative', touchAction: 'pan-y', transform: x ? `translateX(${x}px)` : 'none',
           transition: dragging ? 'none' : 'transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1)' }}>
         {children}
       </div>
@@ -119,7 +121,7 @@ function SwipeRow({ open, onOpenChange, onTap, onLongPress, onEdit, onDelete, ro
 // Plays once per app launch, not every time you come back to home.
 let homeIntroPlayed = false;
 
-function HomeScreen({ collections, captures, queueCount, importCount = 0, onOpenCollection, onImport, onImportFiles, onResumeImport, onWrite, onSort, onSearch, onSettings, onNewDrawer, onDrawerMenu, onDrawerDelete }) {
+function HomeScreen({ collections, captures, queueCount, importCount = 0, needsAI = false, showSampleNote = false, onOpenCollection, onImport, onImportFiles, onResumeImport, onWrite, onSort, onSearch, onSettings, onNewDrawer, onDrawerMenu, onDrawerDelete }) {
   const [intro] = useState(() => !homeIntroPlayed);
   useEffect(() => { homeIntroPlayed = true; }, []);
   const [openId, setOpenId] = useState(null); // the row currently swiped open
@@ -132,23 +134,29 @@ function HomeScreen({ collections, captures, queueCount, importCount = 0, onOpen
       <div className="content">
         <StatusBar/>
         <div style={headerBar(HAIR)}>
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 18px', fontSize: TY.caption, letterSpacing: '0.12em', textTransform: 'uppercase' }}><span data-wordmark style={{ lineHeight: 1, opacity: intro ? 0 : 1, animation: intro ? 'introFade 1ms linear 0.96s both' : 'none' }}>Folio</span></div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 18px', fontSize: TY.caption, letterSpacing: '0.12em', textTransform: 'uppercase' }}><span data-wordmark style={{ lineHeight: 1, opacity: intro ? 0 : 1, animation: intro ? `introFade 1ms linear ${(LAUNCH_GLIDE_AT + LAUNCH_GLIDE_MS) / 1000}s both` : 'none' }}>Folio</span></div>
           <HeaderCell onClick={onSearch} label="Search"><IconSearch/></HeaderCell>
           <HeaderCell onClick={onSettings} label="Settings"><IconSettings/></HeaderCell>
         </div>
 
-        <div className="scroll-y" style={{ flex: 1, animation: intro ? 'introFade 0.34s ease 0.62s both' : 'none' }} onScroll={() => openId && setOpenId(null)}>
+        <div className="scroll-y" style={{ flex: 1, animation: intro ? `introFade ${LAUNCH_GLIDE_MS / 1000}s ease ${LAUNCH_GLIDE_AT / 1000}s both` : 'none' }} onScroll={() => openId && setOpenId(null)}>
+          {/* system prompts sit together at the very top; a faint cream line keeps two black rows apart */}
+          {needsAI && <button onClick={onSettings} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, padding: '18px', border: 'none',
+            borderBottom: queueCount > 0 ? '1px solid color-mix(in srgb, var(--cream) 20%, transparent)' : HAIR, background: 'var(--ink)', color: 'var(--cream)', cursor: 'pointer', fontSize: TY.label, textAlign: 'left' }}>
+            <span>Connect AI to organize your screenshots</span><Arrow dir="right"/>
+          </button>}
+          {queueCount > 0 && (
+            <button onClick={onSort} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+              padding: '18px', border: 'none', borderBottom: HAIR, background: 'var(--ink)', color: 'var(--cream)', cursor: 'pointer', fontSize: TY.label }}>
+              <span>{queueCount} screenshot{queueCount === 1 ? '' : 's'} to sort</span><Arrow dir="right"/>
+            </button>
+          )}
+
           <div style={{ padding: '14px 18px', fontSize: TY.caption, color: 'var(--ink-2)', borderBottom: HAIR }}>
             {collections.length} drawers · {captures.length} kept
           </div>
 
           {importCount > 0 && <button onClick={onResumeImport || onImport} style={{ background:'transparent',border:'none',borderBottom:HAIR,padding:'14px 18px',width:'100%',textAlign:'left',fontSize:TY.label,cursor:'pointer' }}>{plural(importCount, 'image')} to continue<Arrow dir="right" style={{marginLeft:8}}/></button>}
-          {queueCount > 0 && (
-            <button onClick={onSort} style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-              padding: '18px', border: 'none', borderBottom: HAIR, background: 'var(--ink)', color: 'var(--cream)', cursor: 'pointer', fontSize: TY.label }}>
-              <span>{queueCount} screenshot{queueCount === 1 ? '' : 's'} to sort</span><span>Start<Arrow dir="right" style={{marginLeft:8}}/></span>
-            </button>
-          )}
 
           {collections.map((c, i) => {
             const col = THEME.colorOf(c, collections);
@@ -171,6 +179,8 @@ function HomeScreen({ collections, captures, queueCount, importCount = 0, onOpen
               </SwipeRow>
             );
           })}
+
+          {showSampleNote && <div style={{ padding: '14px 18px', borderBottom: HAIR, fontSize: TY.caption, lineHeight: 1.5, color: 'var(--ink-2)' }}>These are sample drawers. You can delete them anytime.</div>}
 
           <div style={{ padding: '18px 18px calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
             <button style={link} onClick={onImport}>Import</button>

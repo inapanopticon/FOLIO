@@ -107,6 +107,10 @@ button, input, textarea, select { font: inherit; color: inherit; }
 /* === misc === */
 /* narrow windows (phone, side pane): fill the width, no strip of page background beside the app */
 @media (max-width: 640px) { .app { max-width: none; } }
+/* wide windows: centring in an odd width lands on half a pixel and blurs the edges, so round the column's position */
+@supports (margin-left: round(down, 1px, 1px)) {
+  @media (min-width: 641px) { .app { margin-left: round(down, calc((100vw - 480px) / 2), 1px); margin-right: 0; } }
+}
 .scroll-y { overflow-y: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
 .scroll-y::-webkit-scrollbar { display: none; }
 

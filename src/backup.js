@@ -91,7 +91,9 @@ window.LocusBackup = (() => {
       files.push({ name: path, bytes });
       images.push({ id, path, type: typeOf[ext] });
     }
-    const manifest = { app: 'folio-backup', version: 1, createdAt: new Date().toISOString(), data, images };
+    const { provider, model, customBaseUrl, customModel, preferences } = window.LocusAI.load(); // never the keys
+    const settings = { provider, model, customBaseUrl, customModel, preferences };
+    const manifest = { app: 'folio-backup', version: 1, createdAt: new Date().toISOString(), data, images, settings };
     files.unshift({ name: MANIFEST, bytes: new TextEncoder().encode(JSON.stringify(manifest)) });
     const day = window.LocusTheme.formatDate().replace(/[ ,]+/g, '-');
     S.saveFile(makeZip(files), `folio-backup-${day}.zip`);
@@ -118,6 +120,7 @@ window.LocusBackup = (() => {
     if (window.LocusImports.isBusy()) throw new Error('An import is still organizing. Pause it first.');
     for (const x of manifest.images) await Images.put(x.id, await toDataUrl(entries.get(x.path), x.type), true);
     S.save(manifest.data);
+    if (manifest.settings) window.LocusAI.save({ ...window.LocusAI.load(), ...manifest.settings }); // keys already here stay
     const keep = new Set(manifest.images.map(x => x.id));
     for (const id of (await Images.keys()) || []) if (!keep.has(id)) await Images.remove(id);
   }

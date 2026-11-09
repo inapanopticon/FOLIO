@@ -5,11 +5,12 @@ function captureFromQueueItem(item, drawerId) {
   return {
     id: `review_${item.id}`,
     title: item.title || [item.source, item.user].filter(Boolean).join(' · ') || 'Untitled',
-    summary: item.summary || item.text || '',
+    summary: item.summary ?? item.text ?? '',
     details: item.details || [],
     tags: item.tags || [],
     note: item.note || '',
     imageId: item.imageId,
+    imageIds: item.imageIds,
     glyph: item.glyph,
     collection: drawerId,
     source: item.source,
@@ -22,11 +23,12 @@ function ConfirmScreen({ queue, collections, onComplete, onBack, onToast, onDeci
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState('');
   const total = useRef(queue.length); total.current = Math.max(total.current, queue.length);
+  const actions = useRef([]); // keep or discard for each decision, so the last message can say what happened
   const P = window.LocusImports;
   if (!current) return null;
 
   const suggestedDrawer = name => ({ id: `suggested:${name}`, name, color: THEME.nextColor(collections) });
-  const existing = collections.find(c => c.name === current.aiGuess);
+  const existing = collections.find(c => c.name.toLowerCase() === String(current.aiGuess || '').toLowerCase());
   const proposed = existing || { ...suggestedDrawer(current.aiGuess), name: current.aiGuess || 'Unsorted', tags: current.tags || [] };
   // A new drawer the AI suggested stays in the list after switching away, so it can be picked again.
   const keepSuggested = current.suggestedDrawer && !collections.some(c => c.name === current.suggestedDrawer);
@@ -42,14 +44,15 @@ function ConfirmScreen({ queue, collections, onComplete, onBack, onToast, onDeci
   const decide = (action, before = () => {}) => act(() => {
     before();
     onDecision({ item: current, action, collection: current.aiGuess });
-    if (queue.length === 1) onComplete();
+    actions.current.push(action);
+    if (queue.length === 1) onComplete(actions.current.includes('keep'));
   });
 
   if (editing) {
     return <EditScreen key={current.id} capture={cap} collection={proposed} collections={available}
       onCancel={() => setEditing(false)}
       onSave={updated => {
-        P.updateItem(current.id, { title: updated.title, summary: updated.summary, tags: updated.tags, ...drawerPatch(updated.collection) });
+        P.updateItem(current.id, { title: updated.title, summary: updated.summary, details: updated.details, tags: updated.tags, ...drawerPatch(updated.collection) });
         setEditing(false);
       }}/>;
   }
@@ -60,7 +63,7 @@ function ConfirmScreen({ queue, collections, onComplete, onBack, onToast, onDeci
   const footer = ({ saveNote }) => (
     <div style={{ display: 'flex', width: '100%', minHeight: 56 }}>
       <button onClick={() => decide('discard', saveNote)} style={{ ...cell, flex: 1, borderRight: hair }}>Skip</button>
-      <button disabled={!canUndo} onClick={() => act(onUndo)} style={{ ...cell, flex: 1, borderRight: hair, opacity: canUndo ? 1 : 0.35 }}>Undo</button>
+      <button disabled={!canUndo} onClick={() => act(() => { onUndo(); actions.current.pop(); })} style={{ ...cell, flex: 1, borderRight: hair, opacity: canUndo ? 1 : 0.35 }}>Undo</button>
       <button onClick={() => decide('keep', saveNote)} style={{ ...cell, flex: 1.5 }}>Save to drawer<Arrow dir="right" style={{ marginLeft: 8 }}/></button>
     </div>
   );

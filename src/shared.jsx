@@ -10,6 +10,12 @@ const HAIR = '1px solid var(--line)';
 // confirming Enter with keyCode 229 and isComposing already false, so both have to be checked.
 const isSubmitEnter = e => e.key === 'Enter' && !e.nativeEvent.isComposing && e.keyCode !== 229;
 
+// Things shown only the first time, remembered on this device. If storage is blocked, count them as seen rather than repeat them.
+const firstTime = {
+  seen: key => { try { return !!localStorage.getItem(`locus.seen.${key}`); } catch (e) { return true; } },
+  mark: key => { try { localStorage.setItem(`locus.seen.${key}`, '1'); } catch (e) {} },
+};
+
 // The grid row at the top of every page.
 const headerBar = line => ({ display: 'flex', alignItems: 'stretch', height: 52, flexShrink: 0, borderTop: line, borderBottom: line });
 

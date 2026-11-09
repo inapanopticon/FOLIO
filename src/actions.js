@@ -17,7 +17,7 @@ window.LocusActions = (() => {
     catch (e) {
       return { data: { collections: [], captures: [], queue: [], imports: { batches: [], tasks: [], decisions: [] } }, error: e.message };
     }
-    const collections = initial.collections.map(withColor).map(c => withTags(c, initial.captures));
+    const collections = initial.collections.map(withColor).map(c => AI.dropUnusedTags(withTags(c, initial.captures), initial.captures));
     const data = { ...initial, collections };
     try { S.save(data); return { data, error: null }; }
     catch (e) { return { data, error: e.message }; }
@@ -36,7 +36,7 @@ window.LocusActions = (() => {
       const captures = d.captures.map(c => (c.id === updated.id ? { ...updated, updatedAt: Date.now() } : c));
       const collections = d.collections.map(c => {
         const next = c.id === updated.collection ? AI.addDrawerTags(c, addedTags, ownTags) : c;
-        return c.id === updated.collection || c.id === previous?.collection ? AI.dropUnusedOwnTags(next, captures) : next;
+        return c.id === updated.collection || c.id === previous?.collection ? AI.dropUnusedTags(next, captures) : next;
       });
       return { ...d, collections, captures };
     });
@@ -47,12 +47,12 @@ window.LocusActions = (() => {
   // drawerId: also remove that drawer, for "delete drawer and what is in it".
   function deleteCaptures(ids, drawerId = null) {
     const removed = S.load().captures.filter(c => ids.has(c.id));
-    const tasks = new Set(removed.map(c => c.importTaskId).filter(Boolean));
+    const tasks = new Set(removed.flatMap(c => c.importTaskIds || [c.importTaskId]).filter(Boolean));
     const affected = new Set(removed.map(c => c.collection));
     S.update(d => {
       const captures = d.captures.filter(c => !ids.has(c.id));
       const collections = (drawerId ? d.collections.filter(c => c.id !== drawerId) : d.collections)
-        .map(c => (affected.has(c.id) ? AI.dropUnusedOwnTags(c, captures) : c));
+        .map(c => (affected.has(c.id) ? AI.dropUnusedTags(c, captures) : c));
       return { ...d, captures, collections, imports: {
         ...d.imports,
         tasks: d.imports.tasks.map(t => (tasks.has(t.id) ? { ...t, state: 'removed' } : t)),
@@ -106,6 +106,7 @@ window.LocusActions = (() => {
         imports: {
           ...d.imports,
           batches: d.imports.batches.map(b => (b.targetId === id ? { ...b, targetName: name } : b)),
+          tasks: d.imports.tasks.map(t => (t.result?.collection === oldName ? { ...t, result: { ...t.result, collection: name } } : t)),
           decisions: d.imports.decisions.map(x => ({ ...x, item: renamed(x.item), collection: x.collection === oldName ? name : x.collection })),
         },
       };

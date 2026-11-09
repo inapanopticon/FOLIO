@@ -1,6 +1,6 @@
 // Folio — Settings: the Qianwen key, model, preferences, export
 
-function SettingsScreen({ onClose, onToast, onExport }) {
+function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
   const AI = window.LocusAI;
   const [s, setS] = useState(() => AI.load());
   const [status, setStatus] = useState(null); // {kind:'ok'|'err'|'busy', msg}
@@ -36,13 +36,18 @@ function SettingsScreen({ onClose, onToast, onExport }) {
     const parsed = await Backup.read(file);
     const when = parsed.createdAt ? THEME.formatDate(parsed.createdAt) : 'an earlier date';
     setConfirm({
-      title: 'Replace everything?', okLabel: 'Restore', danger: true,
+      okLabel: 'Replace everything', danger: true,
       message: `Backup from ${when}: ${plural(parsed.drawers, 'drawer')}, ${plural(parsed.captures, 'capture')}, ${plural(parsed.images, 'image')}. Everything now in Folio will be replaced. This can't be undone.`,
       onOk: () => restore(parsed),
     });
   });
 
   const saveAndClose = () => { AI.save(s); onToast('Settings saved'); onClose(); };
+  const closeWithoutSaving = () => {
+    const saved = AI.load();
+    if (!Object.keys({ ...saved, ...s }).some(k => (s[k] || '') !== (saved[k] || ''))) { onClose(); return; }
+    setConfirm({ message: "Your changes to Settings won't be saved.", okLabel: 'Discard changes', danger: true, onOk: () => onClose() });
+  };
   const test = async () => {
     setStatus({ kind: 'busy', msg: 'Testing…' });
     try { await AI.test(s); AI.save(s); setStatus({ kind: 'ok', msg: `Connected · ${custom ? s.customModel.trim() : s.model}` }); }
@@ -74,7 +79,7 @@ function SettingsScreen({ onClose, onToast, onExport }) {
         <StatusBar/>
         <div style={headerBar(line)}>
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', padding: '0 18px', fontSize: TY.caption, letterSpacing: '0.12em' }}>SETTINGS</div>
-          <button aria-label="Close" onClick={onClose} style={{ ...button, width: 56, borderLeft: line, display: 'grid', placeItems: 'center' }}>
+          <button aria-label="Close" onClick={closeWithoutSaving} style={{ ...button, width: 56, borderLeft: line, display: 'grid', placeItems: 'center' }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
           </button>
         </div>
@@ -114,6 +119,8 @@ function SettingsScreen({ onClose, onToast, onExport }) {
           {persisted !== null && <div style={{ ...section, fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6 }}>
             {persisted ? 'This browser has agreed to keep your data.' : 'This browser may clear saved data when space runs low. Add Folio to your Home Screen and keep a backup.'}
           </div>}
+          <div style={heading}><div style={headingLabel}>HELP</div></div>
+          {dataRow(onShowIntro, 'Show intro again', 'A quick look at how Folio works.')}
           {status && <div role="status" aria-live="polite" style={{ ...section, fontSize: TY.caption, lineHeight: 1.6, overflowWrap: 'anywhere' }}>{status.msg}</div>}
           <div style={{ height: 24 }}/>
         </div>

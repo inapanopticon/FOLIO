@@ -90,14 +90,45 @@ window.LocusImports = (() => {
     return {...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,...patch(t),screened:true,decidedAt:Date.now()} : t)}};
   }
   const keptState=t=>(t.state==='error' ? 'error' : 'ready');
-  function choose(id,keep) { change(d=>reviewed(d,id,t=>({state:keep ? keptState(t) : 'skipped',clipped:false}))); }
-  // clipped: this photo belongs to the same post as the photo kept before it
-  function setClipped(id,clipped) { change(d=>reviewed(d,id,t=>({state:keptState(t),clipped}))); }
+  // Kept photos in order, grouped into posts. A clipped photo joins the photo it was clipped to,
+  // so keeping a photo in between later does not move it. Older data has no clipTo: it joins the group before.
+  function groupPhotos(photos) {
+    const groups=[], groupOf=new Map();
+    photos.forEach(t=>{
+      const target=t.clipped ? (groupOf.get(t.clipTo) || groups[groups.length-1]) : null;
+      const group=target || [];
+      if(!target) groups.push(group);
+      group.push(t);groupOf.set(t.id,group);
+    });
+    return groups;
+  }
+  // A photo is leaving its post. If it was the first, the next one takes over and must not clip onto the post before.
+  function afterLeaving(tasks,task) {
+    const pending=tasks.filter(t=>t.batchId===task.batchId && ['ready','error'].includes(t.state));
+    const post=task.state==='done' ? (task.taskIds || [task.id]) : (groupPhotos(pending).find(g=>g.some(t=>t.id===task.id)) || []).map(t=>t.id);
+    const wasFirst=post[0]===task.id, heir=wasFirst ? post[1] : null, clipTo=wasFirst ? heir : task.clipTo;
+    return tasks.map(t=>t.id===heir ? {...t,clipped:false,clipTo:null} : t.clipTo===task.id ? {...t,clipTo} : t);
+  }
+  function previousKept(tasks,task) {
+    const before=tasks.slice(0,tasks.findIndex(t=>t.id===task.id)).filter(t=>t.batchId===task.batchId && ['ready','error'].includes(t.state));
+    return before.length ? before[before.length-1].id : null;
+  }
+  const itemTaskIds = item => item.taskIds || [item.taskId || item.id];
+  const imageIdsOf = item => [...new Set([...(item.imageIds || []),item.imageId].filter(Boolean))];
+  function choose(id,keep) {
+    change(d=>{
+      const task=d.imports.tasks.find(t=>t.id===id);
+      const tasks=!keep && REVIEWABLE.includes(task?.state) ? afterLeaving(d.imports.tasks,task) : d.imports.tasks;
+      return reviewed({...d,imports:{...d.imports,tasks}},id,t=>({state:keep ? keptState(t) : 'skipped',clipped:false,clipTo:null}));
+    });
+  }
+  // clipped: this photo belongs to the same post as clipTo, the photo kept before it when it was clipped
+  function setClipped(id,clipped) { change(d=>reviewed(d,id,t=>({state:keptState(t),clipped,clipTo:clipped ? previousKept(d.imports.tasks,t) : null}))); }
   function rescreen(id) {
     change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id && t.state==='skipped' ? {...t,state:'screen',screened:false} : t)}}));
   }
   function updateItem(id,patch) {
-    const allowed=['title','summary','tags','note','aiGuess','suggestedDrawer'];
+    const allowed=['title','summary','details','tags','note','aiGuess','suggestedDrawer'];
     const safe=Object.fromEntries(allowed.filter(k=>k in patch).map(k=>[k,patch[k]]));
     change(d=>({...d,queue:d.queue.map(item=>item.id===id ? {...item,...safe,updatedAt:Date.now()} : item)}));
   }
@@ -109,23 +140,29 @@ window.LocusImports = (() => {
     const control={batchId,paused:false};running=control;
     const work=async()=>{
       updateBatch(batchId,{paused:false});
-      const ids=ledger(snapshot()).tasks.filter(t=>t.batchId===batchId && ['ready','error'].includes(t.state)).map(t=>t.id);
+      const groups=groupPhotos(ledger(snapshot()).tasks.filter(t=>t.batchId===batchId && ['ready','error'].includes(t.state)));
       let next=0;
-      const settled = await Promise.allSettled(Array.from({length:Math.min(3,ids.length)},()=> (async()=>{
-        while(!control.paused && next<ids.length) {
-          const id=ids[next++];
-          const task=ledger(snapshot()).tasks.find(t=>t.id===id);
-          if(!task || !['ready','error'].includes(task.state)) continue;
-          updateTask(id,{state:'working',error:null});
+      const settled = await Promise.allSettled(Array.from({length:Math.min(3,groups.length)},()=> (async()=>{
+        while(!control.paused && next<groups.length) {
+          const group=groups[next++], task=group[0], id=task.id;
+          const taskIds=group.map(t=>t.id), imageIds=group.map(t=>t.imageId);
+          const updateGroup = patch => change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>taskIds.includes(t.id) ? {...t,...patch,groupHead:id,taskIds,imageIds,updatedAt:Date.now(),result:t.id===id ? patch.result ?? t.result : null} : t)}}));
+          updateGroup({state:'working',error:null});
           const controller=new AbortController();
           const timer=setTimeout(()=>controller.abort(),60000);
           try {
-            const dataUrl=await I.get(task.imageId);
-            if(!dataUrl){const missing=Error('Saved image is missing. Select this file again.');missing.code='IMAGE_MISSING';throw missing;}
-            const result=await window.LocusAI.analyzeScreenshot(dataUrl,snapshot().collections,{signal:controller.signal});
+            const dataUrls=await Promise.all(imageIds.map(imageId=>I.get(imageId)));
+            const lost=dataUrls.findIndex(url=>!url);
+            if(lost>=0) {
+              // One photo can simply be chosen again. In a post, removing the lost photo lets the rest carry on.
+              const missing=Error(group.length>1 ? `Photo ${lost+1} of this post is missing. Remove it with × and retry.` : 'Saved image is missing. Select this file again.');
+              if(group.length===1) missing.code='IMAGE_MISSING';
+              throw missing;
+            }
+            const result=await window.LocusAI.analyzeScreenshot(dataUrls,snapshot().collections,{signal:controller.signal});
             // A successful result must be committed before it counts as done.
-            updateTask(id,{state:'done',result,error:null});
-          } catch(e) { updateTask(id,{state:e?.code==='IMAGE_MISSING' ? 'save-error' : 'error',error:e?.message || 'Could not read this image.'}); }
+            updateGroup({state:'done',result,error:null});
+          } catch(e) { updateGroup({state:e?.code==='IMAGE_MISSING' ? 'save-error' : 'error',error:e?.message || 'Could not read this post.'}); }
           finally { clearTimeout(timer); }
         }
       })().catch(e=>{control.paused=true;throw e;})));
@@ -145,9 +182,9 @@ window.LocusImports = (() => {
   function queueItemFromTask(t,batch,d) {
     const r=t.result;
     return {
-      id:t.id, taskId:t.id, batchId:t.batchId, imageId:t.imageId,
+      id:t.id, taskId:t.id, taskIds:t.taskIds || [t.id], batchId:t.batchId, imageId:t.imageId, imageIds:imageIdsOf(t),
       glyph:r.emoji, source:r.source || 'Screenshot',
-      title:r.title, summary:r.summary, text:r.text || r.summary, tags:r.tags,
+      title:r.title, summary:r.summary, text:r.text || '', tags:r.tags,
       kind:r.kind || null, details:r.details || [],
       aiGuess:d.collections.find(c=>c.id===batch.targetId)?.name || batch.targetName || r.collection,
       aiIsNew:batch.targetId ? false : r.isNew,
@@ -161,15 +198,22 @@ window.LocusImports = (() => {
       const batch=d.imports.batches.find(b=>b.id===batchId);
       if(!batch) throw Error('Import batch was not found.');
       const done=d.imports.tasks.filter(t=>t.batchId===batchId && t.state==='done');
-      const ids=new Set(done.map(t=>t.id));count=done.length;
-      const items=done.map(t=>queueItemFromTask(t,batch,d));
+      const ids=new Set(done.map(t=>t.id));
+      const items=done.filter(t=>!t.groupHead || t.groupHead===t.id).map(t=>queueItemFromTask(t,batch,d));count=items.length;
       return {...d,queue:[...d.queue,...items.filter(item=>!d.queue.some(q=>q.id===item.id))],imports:{...d.imports,tasks:d.imports.tasks.map(t=>ids.has(t.id) ? {...t,state:'queued'} : t)}};
     });return count;
   }
   async function remove(id) {
     const task=ledger(snapshot()).tasks.find(t=>t.id===id);
     if(!task || ['working','queued','kept'].includes(task.state)) throw Error('This image is being used and cannot be removed here.');
-    updateTask(id,{state:'removed',result:null});
+    // Removing one photo must not delete its neighbours. A previous combined result is
+    // invalid after removal, so the remaining photos go back through AI together.
+    const ids=task.taskIds || [id];
+    change(d=>({...d,imports:{...d.imports,tasks:afterLeaving(d.imports.tasks,d.imports.tasks.find(t=>t.id===id)).map(t=>{
+      if(t.id===id) return {...t,state:'removed',result:null};
+      return ids.includes(t.id) && ['ready','error','done'].includes(t.state)
+        ? {...t,state:'ready',screened:true,result:null,error:null,groupHead:null,taskIds:null,imageIds:null} : t;
+    })}}));
     await I.remove(task.imageId);
   }
   // Delete one import from history. Screenshots already saved to a drawer stay there (their record is
@@ -209,8 +253,8 @@ window.LocusImports = (() => {
     const d = snapshot(), L = ledger(d), used = new Set();
     d.captures.forEach(c => { if (c.imageId) used.add(c.imageId); (c.imageIds || []).forEach(i => used.add(i)); });
     L.tasks.forEach(t => { if (t.state !== 'removed' && t.imageId) used.add(t.imageId); });
-    d.queue.forEach(q => { if (q.imageId) used.add(q.imageId); });
-    L.decisions.forEach(x => { if (x.item?.imageId) used.add(x.item.imageId); });
+    d.queue.forEach(q => imageIdsOf(q).forEach(id=>used.add(id)));
+    L.decisions.forEach(x => { if(x.item) imageIdsOf(x.item).forEach(id=>used.add(id)); });
     let orphans = 0;
     for (const k of keys) if (!used.has(k) && !I.isFresh(k)) { await I.remove(k); orphans++; }
     return { cleared: old.length, orphans };
@@ -221,10 +265,10 @@ window.LocusImports = (() => {
       id:`cap_${item.id}`, collection:col.id,
       title:window.LocusTheme.shortTitle(item.title || item.text || 'Untitled capture'),
       glyph:item.glyph, tags:item.tags || [], source:item.source,
-      summary:item.summary || item.text || '', text:item.text || '',
-      kind:item.kind || null, details:item.details || [], imageId:item.imageId,
+      summary:item.summary ?? item.text ?? '', text:item.text || '',
+      kind:item.kind || null, details:item.details || [], imageId:item.imageId, imageIds:imageIdsOf(item),
       date:window.LocusTheme.formatDate(), addedAt:Date.now(),
-      note:item.note || '', importTaskId:item.taskId,
+      note:item.note || '', importTaskId:item.taskId, importTaskIds:itemTaskIds(item),
     };
   }
   // What saving one screenshot changed in its drawer's tag list, so Undo can put it back.
@@ -273,8 +317,9 @@ window.LocusImports = (() => {
         if(!item)continue; // Repeated callbacks are harmless.
         let capture=null,createdCollection=null,tagChange=null;
         if(decision.action!=='discard') {
-          let col=cols.find(c=>c.name===decision.collection);
-          if(!col){col=S.makeCollection(decision.collection || 'Unsorted',cols);cols.push(col);createdCollection=col.id;}
+          const drawerName=decision.collection || 'Unsorted';
+          let col=cols.find(c=>c.name.toLowerCase()===drawerName.toLowerCase()); // Travel and travel are one drawer
+          if(!col){col=S.makeCollection(drawerName,cols);cols.push(col);createdCollection=col.id;}
           capture=captureFromItem(item,col);
           caps=[capture,...caps.filter(c=>c.id!==capture.id)];
           const aiTags=tasks.find(t=>t.id===item.taskId)?.result?.tags || item.tags || [];
@@ -285,7 +330,7 @@ window.LocusImports = (() => {
         } else discarded++;
         journal.push({id:uid('decision'),item,action:decision.action,collection:decision.collection,captureId:capture?.id,createdCollection,tagChange,at:Date.now()});
         queue=queue.filter(q=>q.id!==item.id);
-        tasks=tasks.map(t=>t.id===item.taskId ? {...t,state:capture ? 'kept' : 'discarded',captureId:capture?.id,decidedAt:Date.now()} : t);
+        tasks=tasks.map(t=>itemTaskIds(item).includes(t.id) ? {...t,state:capture ? 'kept' : 'discarded',captureId:capture?.id,decidedAt:Date.now()} : t);
       }
       return {...d,collections:cols,captures:caps,queue,imports:{...d.imports,tasks:tasks.map(slimDecided),decisions:trimJournal(journal)}};
     });return {kept,discarded};
@@ -301,23 +346,23 @@ window.LocusImports = (() => {
       const caps=d.captures.filter(c=>c.id!==last.captureId);
       // changes made after saving come back with it, so undoing never loses a note or a new title
       const item=saved?.updatedAt ? {
-        ...last.item, title:saved.title, summary:saved.summary, tags:saved.tags, note:saved.note,
+        ...last.item, title:saved.title, summary:saved.summary, details:saved.details, tags:saved.tags, note:saved.note,
         aiGuess:d.collections.find(c=>c.id===saved.collection)?.name || last.item.aiGuess,
       } : last.item;
       const cols=d.collections
         .filter(c=>!(c.id===last.createdCollection && !caps.some(x=>x.collection===c.id)))
-        .map(c=>c.id===last.tagChange?.drawerId ? window.LocusAI.dropUnusedOwnTags(undoTagChange(c,last.tagChange,caps),caps) : c);
-      return {...d,collections:cols,captures:caps,queue:[item,...d.queue.filter(q=>q.id!==last.item.id)],imports:{...d.imports,decisions:journal,tasks:d.imports.tasks.map(t=>t.id===last.item.taskId ? {...t,state:'queued',captureId:null} : t)}};
+        .map(c=>c.id===last.tagChange?.drawerId ? window.LocusAI.dropUnusedTags(undoTagChange(c,last.tagChange,caps),caps) : c);
+      return {...d,collections:cols,captures:caps,queue:[item,...d.queue.filter(q=>q.id!==last.item.id)],imports:{...d.imports,decisions:journal,tasks:d.imports.tasks.map(t=>itemTaskIds(last.item).includes(t.id) ? {...t,state:'queued',captureId:null} : t)}};
     });
   }
   function restore(id) {
     change(d=>{
       const task=d.imports.tasks.find(t=>t.id===id);
       if(!task || task.state!=='discarded')return d;
-      const last=d.imports.decisions.findLast ? d.imports.decisions.findLast(x=>x.item.taskId===id) : [...d.imports.decisions].reverse().find(x=>x.item.taskId===id);
+      const last=[...d.imports.decisions].reverse().find(x=>itemTaskIds(x.item).includes(id));
       if(!last)return d;
-      return {...d,queue:[...d.queue,last.item],imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id ? {...t,state:'queued'} : t),decisions:d.imports.decisions.filter(x=>x.item.taskId!==id)}};
+      return {...d,queue:[...d.queue,last.item],imports:{...d.imports,tasks:d.imports.tasks.map(t=>itemTaskIds(last.item).includes(t.id) ? {...t,state:'queued'} : t),decisions:d.imports.decisions.filter(x=>x.id!==last.id)}};
     });
   }
-  return {OPEN_STATES,UNFINISHED_STATES,snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,choose,setClipped,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
+  return {OPEN_STATES,UNFINISHED_STATES,groupPhotos,snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,choose,setClipped,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
 })();

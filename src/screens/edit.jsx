@@ -8,6 +8,10 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
   const [collId, setCollId] = useState(capture.collection);
   const [newTag, setNewTag] = useState('');
   const isNote = capture.kind === 'note';
+  const [leaving, setLeaving] = useState(false);
+  const snapshot = JSON.stringify([title, summary, details, tags, collId]);
+  const opened = useRef(snapshot);
+  const cancel = () => (newTag.trim() || snapshot !== opened.current ? setLeaving(true) : onCancel());
 
   const titleCount = THEME.titleLength(title);
   const titleTooLong = titleCount > THEME.TITLE_MAX;
@@ -52,7 +56,7 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
       <div className="content">
         <StatusBar/>
         <div style={headerBar(line)}>
-          <button onClick={onCancel} style={{ ...buttonStyle, width: 80, borderRight: line }}>Cancel</button>
+          <button onClick={cancel} style={{ ...buttonStyle, width: 80, borderRight: line }}>Cancel</button>
           <div style={{ flex: 1, display: 'grid', placeItems: 'center', fontSize: TY.caption, letterSpacing: '0.12em' }}>EDIT</div>
           <button disabled={titleBlocked} onClick={save} style={{ ...buttonStyle, width: 80, borderLeft: line, background: col.bg, color: col.fg }}><span style={{ opacity: titleBlocked ? 0.4 : 1 }}>Save</span></button>
         </div>
@@ -107,6 +111,7 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
           <button onClick={onDelete} style={{ ...buttonStyle, display: 'block', textAlign: 'center', width: '100%', minHeight: 56, padding: '18px' }}>DELETE CAPTURE</button>
         </div>}
       </div>
+      {leaving && <Dialog key="leave-edit" dialog={{ message: "Your changes won't be saved.", okLabel: 'Discard changes', danger: true, onOk: () => onCancel() }} onClose={() => setLeaving(false)}/>}
       <style>{`.edit-screen input::placeholder { font-size: ${TY.caption}px; color: ${col.fg}; opacity: 0.8; }`}</style>
     </div>
   );

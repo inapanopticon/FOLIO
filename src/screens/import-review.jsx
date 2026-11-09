@@ -2,12 +2,7 @@
 // Swiping only moves between photos. A choice is never final: go back to a photo and press something else.
 
 const isKeptPhoto = t => ['ready', 'error'].includes(t.state);
-// Kept photos in order, grouped into posts: a clipped photo joins the photo kept before it.
-function clipGroups(kept) {
-  const groups = [];
-  kept.forEach(t => { if (t.clipped && groups.length) groups[groups.length - 1].push(t); else groups.push([t]); });
-  return groups;
-}
+const clipGroups = kept => window.LocusImports.groupPhotos(kept);
 
 const SWIPE_PX = 60;
 
@@ -58,10 +53,15 @@ function PhotoReviewScreen({ tasks, palette, onBack, onChange, onOrganize, onSet
   const canClip = !!current && photos.slice(0, pos).some(isKeptPhoto);
   const isClipped = !!current && isKeptPhoto(current) && canClip && !!current.clipped;
   const group = current && groups.find(g => g.includes(current));
+  // The first time Clip can be used, say what it is for. Any choice on that photo closes it.
+  const [clipTip, setClipTip] = useState(() => !firstTime.seen('clip'));
+  const showClipTip = clipTip && canClip && !isClipped;
+  const closeClipTip = () => { if (showClipTip) { firstTime.mark('clip'); setClipTip(false); } };
   const chosen = { background: palette?.bg || 'var(--ink)', color: palette?.fg || 'var(--cream)' };
   const choiceCell = (selected, last) => ({ ...button, flex: 1, minHeight: 60, borderRight: last ? 'none' : line, fontSize: TY.label, ...(selected ? chosen : null) });
-  const choose = keep => { act(() => P.choose(current.id, keep)); moveBy(1); };
+  const choose = keep => { closeClipTip(); act(() => P.choose(current.id, keep)); moveBy(1); };
   const clip = () => {
+    closeClipTip();
     if (isClipped) { act(() => P.setClipped(current.id, false)); return; } // pressing again lets go; the photo stays kept
     act(() => P.setClipped(current.id, true));
     moveBy(1);
@@ -89,6 +89,15 @@ function PhotoReviewScreen({ tasks, palette, onBack, onChange, onOrganize, onSet
             <Shot imageId={current.imageId} fit="natural" style={{ width: '100%' }}/>
           </div>
         </div>
+        {showClipTip && (
+          <div role="status" style={{ position: 'absolute', left: 12, right: 12, bottom: 12, zIndex: 3, padding: '14px 16px', borderRadius: 13, background: 'var(--ink)', color: 'var(--cream)' }}>
+            <div style={{ fontSize: TY.label, lineHeight: 1.5 }}>Is this photo from the same post as the one before? Tap Clip to save them together.</div>
+            <div style={{ textAlign: 'right', marginTop: 4 }}>
+              <button onClick={closeClipTip} style={{ ...button, minHeight: 32, padding: '4px 0 0 16px', color: 'inherit', fontSize: TY.caption }}>Got it</button>
+            </div>
+            <span aria-hidden="true" style={{ position: 'absolute', left: '50%', bottom: -5, width: 10, height: 10, marginLeft: -5, background: 'var(--ink)', transform: 'rotate(45deg)' }}/>
+          </div>
+        )}
       </div>
       <div key="choices" style={{ display: 'flex', flexShrink: 0, borderTop: line, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         <button aria-pressed={current.state === 'skipped'} onClick={() => choose(false)} style={choiceCell(current.state === 'skipped')}>Skip</button>

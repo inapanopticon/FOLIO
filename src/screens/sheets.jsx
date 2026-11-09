@@ -1,60 +1,68 @@
 // Folio — bottom sheets: drawer menu and the Dialog that replaces the browser's prompt/confirm
 
-// =============== DRAWER MENU (Edit from swipe, long-press or right-click) ===============
-// Colour swatches as a grid of square cells (8 per row), no gaps. The chosen colour stays at full
-// strength and every other one fades (user's pick), so the choice is obvious at a glance.
-function ColorPicker({ value, onPick }) {
+// Every sheet floats above the bottom edge like an iPhone action sheet: rounded cards, centred actions, Cancel on its own.
+const SHEET_LINE = '1px solid var(--line)';
+const floatCard = { background: 'var(--cream)', borderRadius: 13, overflow: 'hidden' };
+const floatHeading = { fontSize: TY.body, fontWeight: 400, lineHeight: 1.3, color: 'var(--ink)', textAlign: 'center', overflowWrap: 'anywhere' };
+const floatAction = { display: 'block', width: '100%', minHeight: 57, padding: '16px 18px', border: 'none', borderRadius: 0, background: 'transparent', fontSize: TY.body, fontWeight: 400, lineHeight: 1.3, textAlign: 'center', cursor: 'pointer', color: 'var(--ink)' };
+function FloatingSheet({ onClose, zIndex, role, label, children }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))' }}>
+    <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex, background: 'rgba(29,28,26,0.35)', display: 'flex', alignItems: 'flex-end',
+      padding: '0 12px calc(env(safe-area-inset-bottom, 0px) + 12px)', animation: 'pgUpIn 0.2s ease both' }}>
+      <div role={role} aria-modal="true" aria-label={label} onClick={(e) => e.stopPropagation()} style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {children}
+        <div style={floatCard}><button onClick={onClose} style={floatAction}>Cancel</button></div>
+      </div>
+    </div>
+  );
+}
+
+// The drawer colours as dots, each at full strength. A ring marks the current one; pale dots get a hairline so they stay visible.
+function ColorDots({ value, onPick }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, minmax(0, 1fr))', padding: '8px 10px 12px' }}>
       {THEME.PALETTE.map((p, i) => (
-        <button key={p.name} onClick={() => onPick(i)} aria-label={p.name} aria-pressed={value === i} style={{
-          aspectRatio: '1', borderRadius: 0, background: p.bg, cursor: 'pointer', padding: 0, border: 'none',
-          opacity: value == null || value < 0 || value === i ? 1 : 0.28, transition: 'opacity .15s',
-          // a thin ink frame too: pale colours (sage, mist) would otherwise blend into the faded ones
-          boxShadow: value === i ? 'inset 0 0 0 2px var(--ink)' : 'none',
-        }}/>
+        <button key={p.name} onClick={() => onPick(i)} aria-label={p.name} aria-pressed={value === i}
+          style={{ height: 44, padding: 0, border: 'none', borderRadius: 0, background: 'transparent', display: 'grid', placeItems: 'center', cursor: 'pointer' }}>
+          <span style={{ width: 26, height: 26, borderRadius: '50%', background: p.bg,
+            boxShadow: value === i ? '0 0 0 2px var(--cream), 0 0 0 3.5px var(--ink)' : 'inset 0 0 0 1px var(--line)' }}/>
+        </button>
       ))}
     </div>
   );
 }
 
-// Bottom sheets share the hairline grid: square corners, full-width rows split by hairlines,
-// small uppercase section labels, and a footer of equal cells.
-const SHEET_LINE = '1px solid var(--line)';
-const sheetLabel = { padding: '14px 18px', fontSize: TY.caption, letterSpacing: '0.12em', color: 'var(--ink)', background: 'var(--band)', borderTop: SHEET_LINE, borderBottom: SHEET_LINE };
-const sheetRow = { display: 'block', width: '100%', textAlign: 'left', padding: '18px', fontSize: TY.body, lineHeight: 1.4,
-  background: 'none', border: 'none', borderTop: SHEET_LINE, borderRadius: 0, color: 'var(--ink)', cursor: 'pointer' };
-function Sheet({ onClose, zIndex, children }) {
+// =============== DRAWER MENU (Edit from swipe, long-press or right-click) ===============
+function DrawerMenu({ collection, collections, onClose, onRename, onRecolor, onDelete }) {
+  const current = THEME.PALETTE.indexOf(THEME.colorOf(collection, collections));
   return (
-    <div onClick={onClose} style={{ position: 'absolute', inset: 0, zIndex, background: 'rgba(29,28,26,0.35)',
-      display: 'flex', alignItems: 'flex-end', animation: 'pgUpIn 0.2s ease both' }}>
-      <div onClick={(e) => e.stopPropagation()} className="safe-bottom" style={{ width: '100%', background: 'var(--cream)',
-        borderTop: SHEET_LINE, overflow: 'hidden' }}>
-        {children}
+    <FloatingSheet onClose={onClose} zIndex={250} role="dialog" label={collection.name}>
+      <div style={floatCard}>
+        <div style={{ ...floatHeading, padding: '16px 18px 0' }}>{collection.name}</div>
+        <ColorDots value={current} onPick={onRecolor}/>
+        <button onClick={onRename} style={{ ...floatAction, borderTop: SHEET_LINE }}>Rename</button>
+        <button onClick={onDelete} style={{ ...floatAction, borderTop: SHEET_LINE, color: 'var(--discard)' }}>Delete drawer</button>
       </div>
-    </div>
+    </FloatingSheet>
   );
 }
 
-function DrawerMenu({ collection, collections, onClose, onRename, onRecolor, onDelete }) {
-  const col = THEME.colorOf(collection, collections);
-  const current = THEME.PALETTE.indexOf(col);
+// =============== CONFIRM SHEET (anything that deletes or throws work away) ===============
+// What will happen, the red action, then Cancel on its own.
+function ConfirmSheet({ dialog, onClose, onConfirm }) {
   return (
-    <Sheet onClose={onClose} zIndex={250}>
-      <div style={{ background: col.bg, color: col.fg, padding: '22px 18px 20px', fontSize: TY.title, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
-        {collection.name}
+    <FloatingSheet onClose={onClose} zIndex={500} role="alertdialog" label={dialog.okLabel}>
+      <div style={floatCard}>
+        <div style={{ padding: '16px 18px', borderBottom: SHEET_LINE, fontSize: TY.caption, lineHeight: 1.5, color: 'var(--ink-2)', textAlign: 'center', overflowWrap: 'anywhere' }}>{dialog.message}</div>
+        <button onClick={onConfirm} style={{ ...floatAction, color: 'var(--discard)' }}>{dialog.okLabel}</button>
       </div>
-      <div style={{ ...sheetLabel, borderTop: 'none' }}>COLOUR</div>
-      <ColorPicker value={current} onPick={onRecolor}/>
-      <button onClick={onRename} style={sheetRow}>Rename</button>
-      <button onClick={onDelete} style={{ ...sheetRow, color: 'var(--discard)' }}>Delete drawer</button>
-      <button onClick={onClose} style={{ ...sheetRow, color: 'var(--ink-2)' }}>Cancel</button>
-    </Sheet>
+    </FloatingSheet>
   );
 }
 
 // =============== DIALOG (replaces the browser's prompt/confirm) ===============
 // dialog = { title, message?, input?: defaultValue, placeholder?, color?: defaultIndex, okLabel, danger?, onOk(value, colorIndex) }
+// danger dialogs need only message and okLabel: they show as a ConfirmSheet.
 function Dialog({ dialog, onClose }) {
   const [value, setValue] = useState(dialog.input ?? '');
   const [color, setColor] = useState(dialog.color);
@@ -63,28 +71,22 @@ function Dialog({ dialog, onClose }) {
   const hasInput = dialog.input !== undefined;
   const can = !hasInput || value.trim().length > 0;
   const ok = () => { if (!can) return; onClose(); dialog.onOk(hasInput ? value.trim() : true, color); };
-  const cell = { flex: 1, minHeight: 56, border: 'none', borderRadius: 0, fontSize: TY.label, cursor: 'pointer', background: 'transparent', color: 'var(--ink)' };
+  if (dialog.danger) return <ConfirmSheet dialog={dialog} onClose={onClose} onConfirm={ok}/>;
 
   return (
-    <Sheet onClose={onClose} zIndex={500}>
-      <div style={{ padding: '22px 18px', fontSize: TY.title, lineHeight: 1.25, letterSpacing: '-0.015em' }}>
-        {dialog.title}
-        {dialog.message && <div style={{ fontSize: TY.body, lineHeight: 1.5, color: 'var(--ink-2)', marginTop: 10, letterSpacing: 0 }}>{dialog.message}</div>}
+    <FloatingSheet onClose={onClose} zIndex={500} role="dialog" label={dialog.title}>
+      <div style={floatCard}>
+        <div style={{ ...floatHeading, padding: hasInput ? '16px 18px 12px' : '16px 18px' }}>{dialog.title}</div>
+        {/* a tinted, rounded, left-aligned box, so it reads as something to type in and the title above does not */}
+        {hasInput && <div style={{ padding: '0 12px 14px' }}>
+          <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={dialog.placeholder || ''}
+            onKeyDown={(e) => { if (isSubmitEnter(e)) ok(); }}
+            style={{ display: 'block', width: '100%', minHeight: 46, padding: '12px 14px', border: 'none', borderRadius: 9, outline: 'none',
+              background: 'var(--band)', fontFamily: 'var(--sans)', fontSize: TY.body, lineHeight: 1.3, textAlign: 'left', color: 'var(--ink)' }}/>
+        </div>}
+        {dialog.color !== undefined && <div style={{ borderTop: SHEET_LINE }}><ColorDots value={color} onPick={setColor}/></div>}
+        <button onClick={ok} disabled={!can} style={{ ...floatAction, borderTop: SHEET_LINE, opacity: can ? 1 : 0.35, cursor: can ? 'pointer' : 'default' }}>{dialog.okLabel || 'OK'}</button>
       </div>
-      {hasInput && (
-        <input ref={ref} value={value} onChange={(e) => setValue(e.target.value)} placeholder={dialog.placeholder || ''}
-          onKeyDown={(e) => { if (isSubmitEnter(e)) ok(); }}
-          style={{ display: 'block', width: '100%', padding: '18px', border: 'none', borderTop: SHEET_LINE, borderRadius: 0,
-            background: 'transparent', fontFamily: 'var(--sans)', fontSize: TY.body, color: 'var(--ink)' }}/>
-      )}
-      {dialog.color !== undefined && <>
-        <div style={sheetLabel}>COLOUR</div>
-        <ColorPicker value={color} onPick={setColor}/>
-      </>}
-      <div style={{ display: 'flex', borderTop: SHEET_LINE, boxShadow: '0 1px 0 var(--line)' }}>
-        <button onClick={onClose} style={{ ...cell, borderRight: SHEET_LINE, color: 'var(--ink-2)' }}>Cancel</button>
-        <button onClick={ok} disabled={!can} style={{ ...cell, background: dialog.danger ? 'var(--discard)' : 'var(--ink)', color: 'var(--cream)', opacity: can ? 1 : 0.35 }}>{dialog.okLabel || 'OK'}</button>
-      </div>
-    </Sheet>
+    </FloatingSheet>
   );
 }

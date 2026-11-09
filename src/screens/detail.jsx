@@ -1,7 +1,8 @@
 // Folio — one saved screenshot or note. Same hairline grid as the drawer page, in the drawer's colour.
 // Previous / next walk through the drawer in the same order as its list. Also used for step 4 of an import.
 
-function DetailScreen({ capture, collection, collections, captures, onBack, onEdit, onOpenRelated, onOpenTag, onUpdate, onMove, onToast, softEnter, reviewInfo, footer, error, steps }) {
+// listTag: the tag the drawer's list is filtered by, so Previous / Next stay inside that list.
+function DetailScreen({ capture, collection, collections, captures, listTag, onBack, onEdit, onOpenRelated, onOpenTag, onUpdate, onMove, onToast, softEnter, reviewInfo, footer, error, steps }) {
   const soft = softEnter ? 'soft-in' : undefined;
   const cap = capture;
   const col = THEME.colorOf(collection, collections);
@@ -24,7 +25,9 @@ function DetailScreen({ capture, collection, collections, captures, onBack, onEd
 
   const withSavedNote = fn => () => { try {saveNote();fn();}catch(e){setNoteError(e.message);} };
 
-  const siblings = window.LocusStore.sortCaptures(captures.filter(c => c.collection === cap.collection));
+  const inDrawer = captures.filter(c => c.collection === cap.collection);
+  const withListTag = inDrawer.filter(c => (c.tags || []).includes(listTag));
+  const siblings = window.LocusStore.sortCaptures(listTag && withListTag.some(c => c.id === cap.id) ? withListTag : inDrawer);
   const pos = siblings.findIndex(c => c.id === cap.id);
   const prev = pos > 0 ? siblings[pos - 1] : null;
   const next = pos >= 0 && pos < siblings.length - 1 ? siblings[pos + 1] : null;

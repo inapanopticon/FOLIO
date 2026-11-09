@@ -236,7 +236,7 @@ function ImportBatch(props) {
         {running && <button onClick={() => act(() => P.pause(batchId))} disabled={batch?.paused} style={importFooterBtn}>{batch?.paused ? 'Finishing current photos…' : 'Pause'}</button>}
         {!running && !screenCount && todo > 0 && (
           <button disabled={busy || !aiReady} onClick={startOrganizing} style={{ ...importFooterBtn, opacity: aiReady ? 1 : 0.4 }}>
-            {errorCount ? 'Retry / continue' : `Organize ${plural(readyCount, 'photo')}`}{nextArrow}
+            {errorCount ? 'Retry / continue' : `Organize ${plural(readyCount, 'post')}`}{nextArrow}
           </button>
         )}
         {results > 0 && (
@@ -289,14 +289,16 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
 
   const batch = data.imports.batches.find(b => b.id === batchId);
   const tasks = liveTasksOf(data, batchId);
-  const count = state => tasks.filter(t => t.state === state).length;
+  const posts = tasks.filter(t=>!t.groupHead || t.groupHead===t.id);
+  const count = state => posts.filter(t => t.state === state).length;
   const batchTarget = batch
     ? (collections.find(c => c.id === batch.targetId) || (batch.targetName ? { name: batch.targetName, id: batch.targetId } : null))
     : target;
-  const screenCount = count('screen');
-  const organized = tasks.filter(t => !!t.result).length;
-  const aiTotal = tasks.filter(t => t.screened && !['skipped', 'saving', 'save-error'].includes(t.state)).length;
-  const working = count('working'), readyCount = count('ready'), errorCount = count('error');
+  const screenCount = tasks.filter(t => t.state === 'screen').length; // review goes photo by photo, not post by post
+  const organized = posts.filter(t => !!t.result).length;
+  const pending = clipGroups(tasks.filter(t=>['ready','error'].includes(t.state)));
+  const aiTotal = pending.length + posts.filter(t=>['working','done','queued','kept','discarded'].includes(t.state)).length;
+  const working = count('working'), readyCount = pending.filter(g=>g.every(t=>t.state==='ready')).length, errorCount = pending.filter(g=>g.some(t=>t.state==='error')).length;
   const todo = readyCount + errorCount, done = count('done'), queued = count('queued');
   const running = P.isRunning(batchId);
   const busy = adding || !!batch?.receiving || running;
@@ -355,7 +357,7 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
   const askDelete = b => {
     const saved = liveTasksOf(data, b.id).filter(t => t.state === 'kept').length;
     setConfirm({
-      title: 'Delete this import?', okLabel: 'Delete', danger: true,
+      okLabel: 'Delete import', danger: true,
       message: `${importDate(b.createdAt)} · ${b.targetName || 'Inbox'}. `
         + (saved ? `${plural(saved, 'screenshot')} already in drawers will stay. ` : '')
         + 'Photos not yet saved to a drawer will be removed. This can\'t be undone.',

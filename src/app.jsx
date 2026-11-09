@@ -59,6 +59,13 @@ function App() {
   const [toast, setToast] = useState(null);
   const [dialog, setDialog] = useState(null);
   const [launching, setLaunching] = useState(true); // the typed-wordmark intro, once per app start
+  // The welcome pages: only for someone new, so anyone already using Folio is not interrupted.
+  const [intro, setIntro] = useState(() => (!boot.error && !firstTime.seen('intro') && !window.LocusAI.isReady() && !boot.data.imports.batches.length ? { afterLaunch: true } : null));
+  const finishIntro = connect => {
+    firstTime.mark('intro');
+    setIntro(null);
+    if (connect && cur.name !== 'settings') push({ name: 'settings' }, 'up');
+  };
 
   const showToast = (message, action, onAction) => setToast({ message, action, onAction, id: Date.now() });
 
@@ -79,23 +86,21 @@ function App() {
   const deleteDrawer = coll => {
     const inside = captures.filter(c => c.collection === coll.id);
     setDialog({
-      title: `Delete ${coll.name}?`,
-      message: inside.length ? `The ${plural(inside.length, 'capture')} in it will be deleted too. This can't be undone.` : "It's empty, so nothing else is lost.",
-      okLabel: 'Delete', danger: true,
+      message: inside.length ? `${coll.name} and the ${plural(inside.length, 'capture')} in it will be permanently deleted.` : `${coll.name} is empty and will be deleted.`,
+      okLabel: 'Delete drawer', danger: true,
       onOk: () => { ACT.deleteCaptures(new Set(inside.map(c => c.id)), coll.id); showToast('Drawer deleted'); },
     });
   };
   const askDeleteTag = (coll, tag) => {
     const n = captures.filter(c => c.collection === coll.id && (c.tags || []).includes(tag)).length;
     setDialog({
-      title: `Delete ${tag}?`,
-      message: n ? `It will be removed from ${plural(n, 'capture')} in this drawer. The captures stay.` : 'No captures use this tag.',
-      okLabel: 'Delete', danger: true,
+      message: n ? `${tag} will be removed from ${plural(n, 'capture')} in this drawer. The captures stay.` : `${tag} isn't used by any capture.`,
+      okLabel: 'Delete tag', danger: true,
       onOk: () => { ACT.removeDrawerTag(coll.id, tag); showToast('Tag deleted'); },
     });
   };
   const askDeleteCapture = (cap, afterDelete) => setDialog({
-    title: 'Delete this capture?', message: "This can't be undone.", okLabel: 'Delete', danger: true,
+    message: 'This capture will be permanently deleted.', okLabel: 'Delete capture', danger: true,
     onOk: () => { ACT.deleteCaptures(new Set([cap.id])); showToast('Deleted'); afterDelete?.(); },
   });
   const renameDrawer = coll => setDialog({
@@ -120,6 +125,8 @@ function App() {
           captures={captures}
           queueCount={queue.length}
           importCount={(data.imports?.tasks || []).filter(t => IMP.OPEN_STATES.includes(t.state)).length}
+          needsAI={!window.LocusAI.isReady()}
+          showSampleNote={!data.imports?.batches?.length && collections.some(c => window.LOCUS_DATA.collections.some(s => s.id === c.id))}
           onOpenCollection={openDrawer}
           onImport={() => push({ name: 'import' }, 'up')}
           onImportFiles={files => push({ name: 'import', files }, 'up')}
@@ -163,6 +170,7 @@ function App() {
             collection={findCollection(cap.collection) || { name: 'Unsorted' }}
             collections={collectionsView}
             captures={captures}
+            listTag={stack[stack.length - 2]?.name === 'drawer' ? stack[stack.length - 2].tag : null}
             onBack={() => pop(stack[stack.length - 2]?.name === 'drawer' ? 'swap' : 'back')}
             onEdit={() => push({ name: 'edit', captureId: cap.id })}
             onOpenTag={tag => push({ name: 'drawer', collId: cap.collection, tag }, 'swap')}
@@ -219,7 +227,7 @@ function App() {
           onDone={batchId => push({ name: 'triage', batchId }, 'fwd')}
         />
       );
-      case 'settings': return <SettingsScreen onClose={() => pop()} onToast={showToast} onExport={exportData}/>;
+      case 'settings': return <SettingsScreen onClose={() => pop()} onToast={showToast} onExport={exportData} onShowIntro={() => setIntro({ afterLaunch: false })}/>;
       case 'triage': return queue.length === 0 ? null : (
         <ConfirmScreen
           queue={page.batchId ? queue.filter(item => item.batchId === page.batchId) : queue}
@@ -228,7 +236,7 @@ function App() {
           onUndo={() => IMP.undo(page.batchId)}
           canUndo={(data.imports?.decisions || []).some(d => !page.batchId || d.item.batchId === page.batchId)}
           onBack={() => pop()}
-          onComplete={() => { showToast('Saved'); reset({ name: 'home' }); }}
+          onComplete={kept => { showToast(kept ? 'Saved' : 'All skipped'); reset({ name: 'home' }); }}
           onToast={showToast}
         />
       );
@@ -254,6 +262,7 @@ function App() {
     <div className="app" ref={appRef}>
       {transitioning && renderScreen(transitioning, true)}
       {renderScreen(cur, false)}
+      {intro && <IntroScreen afterLaunch={intro.afterLaunch} onDone={finishIntro}/>}
       {storageError && <StorageErrorBar message={storageError} onRetry={retrySave}/>}
       {launching && <LaunchWordmark onDone={() => setLaunching(false)}/>}
       {expand && (
