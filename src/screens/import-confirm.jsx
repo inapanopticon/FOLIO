@@ -64,7 +64,7 @@ function ConfirmScreen({ queue, collections, onComplete, onBack, onToast, onDeci
     <div style={{ display: 'flex', width: '100%', minHeight: 56 }}>
       <button onClick={() => decide('discard', saveNote)} style={{ ...cell, flex: 1, borderRight: hair }}>Skip</button>
       <button disabled={!canUndo} onClick={() => act(() => { onUndo(); actions.current.pop(); })} style={{ ...cell, flex: 1, borderRight: hair, opacity: canUndo ? 1 : 0.35 }}>Undo</button>
-      <button onClick={() => decide('keep', saveNote)} style={{ ...cell, flex: 1.5 }}>Save to drawer<Arrow dir="right" style={{ marginLeft: 8 }}/></button>
+      <button onClick={() => decide('keep', saveNote)} style={{ ...cell, flex: 1 }}>Save to drawer<Arrow dir="right" style={{ marginLeft: 8 }}/></button>
     </div>
   );
 
