@@ -76,7 +76,9 @@ function SearchScreen({ collections, captures, onCancel, onOpenCapture, initialQ
                   <span style={{ display: 'block', fontSize: TY.body, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{hl(c.title)}</span>
                   <span style={{ display: 'block', fontSize: TY.label, lineHeight: 1.5, marginTop: 6, opacity: 0.8, overflowWrap: 'anywhere' }}>{(c.tags||[]).slice(0,3).map((t,j)=><React.Fragment key={j}>{j>0 ? ' · ' : ''}{hl(t)}</React.Fragment>)}</span>
                 </span>
-                <Shot imageId={c.imageId} glyph={c.glyph} fontSize={TY.body} style={{ width: 64, height: 64, flexShrink: 0, borderLeft: line, background: 'transparent' }}/>
+                <span style={{ width: 64, flexShrink: 0, borderLeft: line }}>
+                  <Shot imageId={c.imageId} glyph={c.glyph} fontSize={TY.body} style={{ width: '100%', height: 64, background: 'transparent' }}/>
+                </span>
               </button>)}
             </div>;
           })}

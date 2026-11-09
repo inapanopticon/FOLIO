@@ -81,7 +81,7 @@ function Dialog({ dialog, onClose }) {
         <div style={sheetLabel}>COLOUR</div>
         <ColorPicker value={color} onPick={setColor}/>
       </>}
-      <div style={{ display: 'flex', borderTop: SHEET_LINE }}>
+      <div style={{ display: 'flex', borderTop: SHEET_LINE, boxShadow: '0 1px 0 var(--line)' }}>
         <button onClick={onClose} style={{ ...cell, borderRight: SHEET_LINE, color: 'var(--ink-2)' }}>Cancel</button>
         <button onClick={ok} disabled={!can} style={{ ...cell, background: dialog.danger ? 'var(--discard)' : 'var(--ink)', color: 'var(--cream)', opacity: can ? 1 : 0.35 }}>{dialog.okLabel || 'OK'}</button>
       </div>

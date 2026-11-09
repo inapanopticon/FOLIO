@@ -3,6 +3,7 @@
 function EditScreen({ capture, collection, collections, onCancel, onSave, onDelete }) {
   const [title, setTitle] = useState(capture.title);
   const [summary, setSummary] = useState(capture.kind === 'note' ? (capture.text || capture.summary) : capture.summary);
+  const [details, setDetails] = useState(capture.details || []);
   const [tags, setTags] = useState(capture.tags || []);
   const [collId, setCollId] = useState(capture.collection);
   const [newTag, setNewTag] = useState('');
@@ -14,7 +15,10 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
   const titleBlocked = titleEmpty || (titleTooLong && title !== capture.title);
   const save = () => !titleBlocked && onSave({
     ...capture, title, tags: [...new Set([...tags, newTag.trim()].filter(Boolean))], collection: collId,
-    ...(isNote ? { text: summary, summary } : { summary }),
+    ...(isNote ? { text: summary, summary } : {
+      summary,
+      details: details.map(d => ({ label: String(d.label || '').trim(), value: String(d.value || '').trim() })).filter(d => d.label && d.value),
+    }),
   });
 
   const selected = collections.find(c => c.id === collId) || collection;
@@ -23,13 +27,14 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
   useStatusBarTint(col.bg);
   const titleRef = useRef(null);
   const summaryRef = useRef(null);
+  const detailRefs = useRef([]);
   useEffect(() => {
-    [titleRef.current, summaryRef.current].forEach(el => {
+    [titleRef.current, summaryRef.current, ...detailRefs.current].forEach(el => {
       if (!el) return;
       el.style.height = 'auto';
       el.style.height = `${el.scrollHeight}px`;
     });
-  }, [title, summary]);
+  }, [title, summary, details]);
   const labelStyle = { display: 'block', fontSize: TY.caption, letterSpacing: '0.12em', marginBottom: 12, color: col.fg, opacity: 0.8 };
   const sectionStyle = { padding: '18px', borderBottom: line };
   const fieldStyle = { display: 'block', width: '100%', border: 'none', borderRadius: 0, background: 'transparent', color: 'inherit', padding: 0, fontSize: TY.body, lineHeight: 1.55, resize: 'none' };
@@ -39,6 +44,8 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
     if (t && !tags.includes(t)) setTags(all => [...all, t]);
     setNewTag('');
   };
+  const updateDetail = (index, patch) => setDetails(all => all.map((detail, i) => i === index ? { ...detail, ...patch } : detail));
+  const removeDetail = index => setDetails(all => all.filter((_, i) => i !== index));
 
   return (
     <div className="page edit-screen" style={{ background: col.bg, color: col.fg }}>
@@ -69,6 +76,18 @@ function EditScreen({ capture, collection, collections, onCancel, onSave, onDele
             <label htmlFor="edit-summary" style={labelStyle}>{isNote ? 'TEXT' : 'SUMMARY'}</label>
             <textarea ref={summaryRef} id="edit-summary" rows={3} value={summary} onChange={e=>setSummary(e.target.value)} style={fieldStyle}/>
           </div>
+          {!isNote && <div style={{ paddingTop: 18, borderBottom: line }}>
+            <div style={{ ...labelStyle, marginLeft: 18 }}>KEY DETAILS</div>
+            {details.map((detail, i) => <div key={i} style={{ display: 'flex', alignItems: 'stretch', borderTop: line }}>
+              <input aria-label={`Detail ${i + 1} label`} value={detail.label} onChange={e=>updateDetail(i, { label: e.target.value })}
+                style={{ ...fieldStyle, width: '34%', flexShrink: 0, padding: '14px 12px 14px 18px', borderRight: line, fontSize: TY.label }}/>
+              <textarea ref={el=>{ detailRefs.current[i] = el; }} aria-label={`Detail ${i + 1} value`} rows={1} value={detail.value}
+                onChange={e=>updateDetail(i, { value: e.target.value })} style={{ ...fieldStyle, flex: 1, minWidth: 0, padding: '14px 10px 14px 14px', fontSize: TY.label, overflow: 'hidden' }}/>
+              <button aria-label={`Remove detail ${i + 1}`} onClick={()=>removeDetail(i)} style={{ ...buttonStyle, width: 44, flexShrink: 0, borderLeft: line, fontSize: TY.body }}>×</button>
+            </div>)}
+            {details.length < 8 && <button onClick={()=>setDetails(all=>[...all, { label: '', value: '' }])}
+              style={{ ...buttonStyle, display: 'block', width: '100%', minHeight: 52, padding: '14px 18px', borderTop: line, textAlign: 'left', fontSize: TY.label }}>+ Add detail</button>}
+          </div>}
           <div style={{ paddingTop: 18, borderBottom: line }}>
             <label htmlFor="edit-new-tag" style={{ ...labelStyle, marginLeft: 18 }}>TAGS</label>
             <TagGrid tags={tags} line={line} onRemove={t=>setTags(all=>all.filter(x=>x!==t))}/>
