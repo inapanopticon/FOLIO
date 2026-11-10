@@ -225,6 +225,7 @@ function App() {
           onClose={() => pop()}
           onOpenSettings={() => push({ name: 'settings' }, 'up')}
           onDone={batchId => push({ name: 'triage', batchId }, 'fwd')}
+          onToast={showToast}
         />
       );
       case 'settings': return <SettingsScreen onClose={() => pop()} onToast={showToast} onExport={exportData} onShowIntro={() => setIntro({ afterLaunch: false })}/>;
@@ -233,6 +234,7 @@ function App() {
           queue={page.batchId ? queue.filter(item => item.batchId === page.batchId) : queue}
           collections={collectionsView}
           onDecision={decision => IMP.decide([decision])}
+          onAddDrawer={(suggestion, onName) => setDialog({ title: 'New drawer', input: suggestion, placeholder: 'Travel, recipes, ideas…', okLabel: 'Add and save', onOk: onName })}
           onUndo={() => IMP.undo(page.batchId)}
           canUndo={(data.imports?.decisions || []).some(d => !page.batchId || d.item.batchId === page.batchId)}
           onBack={() => pop()}

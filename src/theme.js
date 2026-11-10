@@ -23,8 +23,12 @@ window.LocusTheme = (() => {
     { name: 'charcoal',  bg: '#303638', fg: '#dde3e3' },
   ];
 
+  // A screenshot no drawer fits yet has no colour of its own.
+  const PLAIN = { name: 'plain', bg: '#ffffff', fg: '#222220' };
+
   // A collection keeps the colour it was given; older data falls back to its position.
   function colorOf(collection, collections) {
+    if (collection?.plain) return PLAIN;
     if (collection && Number.isInteger(collection.color)) return PALETTE[collection.color % PALETTE.length];
     const i = collections ? collections.findIndex((c) => c.id === collection?.id) : -1;
     return PALETTE[(i < 0 ? 0 : i) % PALETTE.length];

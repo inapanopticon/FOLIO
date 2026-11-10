@@ -89,7 +89,7 @@ const INTRO_PAGES = [
   { tone: 'mustard', Art: IntroDrawers, title: 'Sort your screenshots into drawers', body: 'Import screenshots from your photos. Folio groups them by topic, so they\'re easy to find later.' },
   { tone: 'vermilion', Art: IntroClip, title: 'First, choose what to keep', body: 'Skip the photos you don\'t need. If several photos come from one post, clip them together.' },
   { tone: 'cobalt', Art: IntroSummary, title: 'Then AI organizes them', body: 'It adds a title, a summary and key details, then suggests a drawer. Nothing is saved until you confirm.' },
-  { tone: 'navy', Art: null, title: 'Connect AI to get started', body: 'You\'ll need your own Qianwen API key. Photos are sent to the AI only when you tap Organize. Your drawers stay in this browser.' },
+  { tone: 'navy', Art: null, title: 'Connect AI to get started', body: 'You\'ll need your own AI API key. Photos are sent to the AI only when you tap Organize. Your drawers stay in this browser.' },
 ];
 const INTRO_SWIPE_PX = 60;
 

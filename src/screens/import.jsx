@@ -90,7 +90,7 @@ function BatchRow({ batch, tasks, quiet, onOpen, onLong }) {
     <LongPressRow onLong={onLong} onClick={onOpen} style={{ ...importBtn, ...importRow, width: '100%', textAlign: 'left', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
       <span>
         <span style={{ display: 'block', fontSize: TY.label, color: 'var(--ink)' }}>{importDate(batch.createdAt)} · {batch.targetName || 'Inbox'}</span>
-        <span style={{ color: soft }}>{summarizeBatch(tasks)}</span>
+        <span style={{ color: soft }}>{summarizeBatch(tasks)}{window.LocusImports.isWaiting(batch.id) ? ' · In line' : ''}</span>
       </span>
       <Arrow dir="right" style={quiet ? { color: soft } : undefined}/>
     </LongPressRow>
@@ -182,6 +182,7 @@ function BatchSummary({ batch, batchId, tasks, adding, progress, busy, organized
         {batch.rejected > 0 && <div>{batch.rejected} not added</div>}
         {!busy && interrupted > 0 && <div>{interrupted} files were interrupted before saving finished. Choose them again; saved ones are skipped.</div>}
         {batch.paused && <div>{working ? 'Finishing current photos…' : 'Paused · progress saved'}</div>}
+        {window.LocusImports.isWaiting(batchId) && <div>In line · {plural(window.LocusImports.importsAhead(batchId), 'import')} ahead · Starts by itself</div>}
       </div>
       {batch.lastDuplicateBatch && batch.lastDuplicateBatch !== batchId && (
         <button onClick={() => setBatchId(batch.lastDuplicateBatch)} style={{ ...importBtn, fontSize: TY.caption, textDecoration: 'underline', padding: '8px 0 0' }}>View previous import</button>
@@ -192,7 +193,7 @@ function BatchSummary({ batch, batchId, tasks, adding, progress, busy, organized
 
 // ===== ONE BATCH: its photos, where each one is, and the next step =====
 function ImportBatch(props) {
-  const { batch, batchId, batchTarget, tasks, adding, busy, running, error, screenCount, todo, errorCount, readyCount, done, queued, palette,
+  const { batch, batchId, batchTarget, tasks, adding, busy, running, waiting, error, screenCount, todo, errorCount, readyCount, done, queued, palette,
     visibleCount, setVisibleCount, setDragOver, addFiles, fileRef, act, direct, setReviewing, onOpenSettings, startOrganizing, finish, backToStart } = props;
   const P = window.LocusImports;
   const aiReady = window.LocusAI.isReady();
@@ -203,7 +204,7 @@ function ImportBatch(props) {
   return (
     <div className="page"><div className="content">
       <StatusBar/>
-      <ImportHeader label={`IMPORT · ${(batchTarget?.name || 'Inbox').toUpperCase()}`} onBack={() => { if (running) P.pause(batchId); backToStart(); }}/>
+      <ImportHeader label={`IMPORT · ${(batchTarget?.name || 'Inbox').toUpperCase()}`} onBack={() => backToStart()}/>
       <ImportSteps step={step} allDone={finished}/>
       <div className="scroll-y" style={{ flex: 1, minHeight: 0 }}>
         <BatchSummary {...props}/>
@@ -223,7 +224,7 @@ function ImportBatch(props) {
         {tasks.length > visibleCount && (
           <button onClick={() => setVisibleCount(n => n + 60)} style={{ ...importBtn, ...importRow, width: '100%' }}>Show more · {tasks.length - visibleCount} remaining</button>
         )}
-        {!finished && (
+        {!finished && tasks.length < P.MAX_PHOTOS && (
           <div {...dropZone(setDragOver, addFiles)}>
             <button disabled={busy} onClick={() => fileRef.current?.click()} style={{ ...importBtn, ...importRow, width: '100%', textAlign: 'left', color: 'var(--ink-2)' }}>+ Add more photos to this import</button>
             <PhotoFileInput inputRef={fileRef} onFiles={addFiles}/>
@@ -232,9 +233,10 @@ function ImportBatch(props) {
       </div>
       <div style={{ flexShrink: 0, borderTop: HAIR, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
         {screenCount > 0 && <button disabled={busy} onClick={() => setReviewing(true)} style={importFooterBtn}>Review {plural(screenCount, 'photo')}{nextArrow}</button>}
-        {!screenCount && !running && readyCount > 0 && <button disabled={busy} onClick={() => setReviewing(true)} style={{ ...importFooterBtn, borderBottom: HAIR }}>Review choices{nextArrow}</button>}
+        {waiting && <button onClick={() => act(() => P.cancelWaiting(batchId))} style={importFooterBtn}>Leave the line</button>}
+        {!screenCount && !running && !waiting && readyCount > 0 && <button disabled={busy} onClick={() => setReviewing(true)} style={{ ...importFooterBtn, borderBottom: HAIR }}>Review choices{nextArrow}</button>}
         {running && <button onClick={() => act(() => P.pause(batchId))} disabled={batch?.paused} style={importFooterBtn}>{batch?.paused ? 'Finishing current photos…' : 'Pause'}</button>}
-        {!running && !screenCount && todo > 0 && (
+        {!running && !waiting && !screenCount && todo > 0 && (
           <button disabled={busy || !aiReady} onClick={startOrganizing} style={{ ...importFooterBtn, opacity: aiReady ? 1 : 0.4 }}>
             {errorCount ? 'Retry / continue' : `Organize ${plural(readyCount, 'post')}`}{nextArrow}
           </button>
@@ -254,7 +256,7 @@ function ImportBatch(props) {
 // initialFiles: photos already picked from Home or a drawer. The screen saves them (with the
 // duplicate check), then moves forward by itself: saved → manual review → (you tap Organize) → results.
 const consumedPicks = new WeakSet(); // picked-file lists that have already been imported
-function ImportScreen({ collections, target, resume, initialFiles, onClose, onDone, onOpenSettings }) {
+function ImportScreen({ collections, target, resume, initialFiles, onClose, onDone, onOpenSettings, onToast }) {
   const P = window.LocusImports, S = window.LocusStore;
   // opened straight into one batch (a drawer's +, Home's continue row): back closes Import instead of
   // showing the Import page. Anything started from the Import page goes back to it.
@@ -274,17 +276,12 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
   const [reviewing, setReviewing] = useState(false);
   const [confirm, setConfirm] = useState(null); // delete-import sheet
   const fileRef = useRef();
-  const batchRef = useRef(batchId); batchRef.current = batchId;
   const flow = useRef({ auto: !!initialFiles?.length, reviewed: false, finished: false }); // auto-advance for a batch started from the picker
 
   useEffect(() => {
     const unsubscribe = S.subscribe(() => setData(S.load()));
     P.recover().catch(e => setError(e.message));
-    return () => {
-      unsubscribe();
-      const id = batchRef.current;
-      if (id && P.isRunning(id)) { try { P.pause(id); } catch (e) {} }
-    };
+    return unsubscribe; // leaving this page does not stop recognition: only Pause does
   }, []);
 
   const batch = data.imports.batches.find(b => b.id === batchId);
@@ -301,7 +298,8 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
   const working = count('working'), readyCount = pending.filter(g=>g.every(t=>t.state==='ready')).length, errorCount = pending.filter(g=>g.some(t=>t.state==='error')).length;
   const todo = readyCount + errorCount, done = count('done'), queued = count('queued');
   const running = P.isRunning(batchId);
-  const busy = adding || !!batch?.receiving || running;
+  const waiting = P.isWaiting(batchId);
+  const busy = adding || !!batch?.receiving || running || waiting;
   const palette = batchTarget ? THEME.colorOf(batchTarget, collections) : null;
 
   const act = async fn => {
@@ -311,15 +309,19 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
   };
   const addFiles = async files => {
     if (busy) return;
+    const startsNew = !batch || (tasks.length > 0 && tasks.every(t => ['kept', 'discarded'].includes(t.state)));
+    const list = Array.from(files), room = P.MAX_PHOTOS - (startsNew ? 0 : tasks.length);
+    if (room <= 0) { onToast(`One import holds up to ${P.MAX_PHOTOS} photos`); return; }
+    if (list.length > room) onToast(`One import holds up to ${P.MAX_PHOTOS} photos · Added ${room} of ${list.length}`);
     setAdding(true); setError('');
     try {
       let id = batchId;
-      if (!batch || (tasks.length > 0 && tasks.every(t => ['kept', 'discarded'].includes(t.state)))) {
+      if (startsNew) {
         id = P.createBatch(batch ? batchTarget : target);
-        setBatchId(id); batchRef.current = id;
+        setBatchId(id);
         flow.current = { auto: true, reviewed: false, finished: false };
       }
-      await P.addFiles(id, Array.from(files), setProgress);
+      await P.addFiles(id, list.slice(0, room), setProgress);
       setData(S.load());
     } catch (e) { setError(e.message); }
     finally { setAdding(false); setProgress(null); }
@@ -329,7 +331,7 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
     window.addEventListener('paste', paste);
     return () => window.removeEventListener('paste', paste);
   }, [batchId, busy]);
-  const close = () => act(async () => { if (running) P.pause(batchId); onClose(); });
+  const close = () => onClose();
   const finish = () => act(() => { if (done) P.review(batchId); onDone(batchId); });
   const startOrganizing = () => { setReviewing(false); act(() => P.run(batchId)); };
 
@@ -371,7 +373,7 @@ function ImportScreen({ collections, target, resume, initialFiles, onClose, onDo
 
   const shared = { busy, adding, progress, error, setDragOver, addFiles, fileRef, direct, setBatchId, act };
   if (!batch) return <ImportStart {...shared} data={data} target={target} close={close} dragOver={dragOver} askDelete={askDelete} confirm={confirm} setConfirm={setConfirm}/>;
-  return <ImportBatch {...shared} batch={batch} batchId={batchId} batchTarget={batchTarget} tasks={tasks} running={running} organized={organized} aiTotal={aiTotal} working={working}
+  return <ImportBatch {...shared} batch={batch} batchId={batchId} batchTarget={batchTarget} tasks={tasks} running={running} waiting={waiting} organized={organized} aiTotal={aiTotal} working={working}
     screenCount={screenCount} todo={todo} errorCount={errorCount} readyCount={readyCount} done={done} queued={queued} palette={palette} visibleCount={visibleCount} setVisibleCount={setVisibleCount}
     setReviewing={setReviewing} onOpenSettings={onOpenSettings} startOrganizing={startOrganizing} finish={finish} backToStart={backToStart}/>;
 }

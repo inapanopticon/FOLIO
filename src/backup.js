@@ -91,8 +91,8 @@ window.LocusBackup = (() => {
       files.push({ name: path, bytes });
       images.push({ id, path, type: typeOf[ext] });
     }
-    const { provider, model, customBaseUrl, customModel, preferences } = window.LocusAI.load(); // never the keys
-    const settings = { provider, model, customBaseUrl, customModel, preferences };
+    const { customBaseUrl, customModel, preferences } = window.LocusAI.load(); // never the keys
+    const settings = { customBaseUrl, customModel, preferences };
     const manifest = { app: 'folio-backup', version: 1, createdAt: new Date().toISOString(), data, images, settings };
     files.unshift({ name: MANIFEST, bytes: new TextEncoder().encode(JSON.stringify(manifest)) });
     const day = window.LocusTheme.formatDate().replace(/[ ,]+/g, '-');

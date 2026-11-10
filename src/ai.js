@@ -1,11 +1,11 @@
-// Locus — Qianwen (Qwen) vision: settings + screenshot analysis
+// Locus — AI vision: settings + screenshot analysis
 // Calls the OpenAI-compatible endpoint straight from the browser.
 // The API key is kept only in this browser's localStorage.
 
 window.LocusAI = (() => {
   const KEY = 'locus.settings';
-  const PAYG_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-  const DEFAULTS = { provider: 'qianwen', apiKey: '', model: 'qwen3.8-flash', preferences: '', customKey: '', customBaseUrl: '', customModel: '' };
+  const QIANWEN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+  const DEFAULTS = { customKey: '', customBaseUrl: '', customModel: '', preferences: '' };
 
   // Limits on the drawer list sent with every screenshot, the one part of the prompt that grows with use.
   // Drawer names are never cut: the AI has to be able to pick any of them.
@@ -16,48 +16,52 @@ window.LocusAI = (() => {
   const AI_MAX_TAGS = 4;
   const DRAWER_MAX_TAGS = 20;
 
-  const MODELS = [
-    { id: 'qwen3.8-flash', note: 'Fast & cheap · recommended' },
-    { id: 'qwen3.8-max', note: 'Strongest · slower, pricier' },
-    { id: 'qwen3.7-plus', note: 'Balanced' },
-    { id: 'qwen3-vl-flash', note: 'Lowest latency' },
-  ];
-
   function load() {
-    try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
+    let saved;
+    try { saved = { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; }
     catch (e) { return { ...DEFAULTS }; }
+    // Settings saved when Qianwen was a fixed option carry over into the three fields everyone fills in now.
+    if (saved.apiKey && !saved.customBaseUrl && !saved.customModel) {
+      return { ...saved, customKey: saved.apiKey, customBaseUrl: QIANWEN_BASE, customModel: saved.model || 'qwen3.8-flash' };
+    }
+    return saved;
   }
   function save(s) {
     try { localStorage.setItem(KEY, JSON.stringify(s)); } catch (e) {}
   }
-  // 'custom' is any other service that accepts the same request format as OpenAI.
-  const isCustom = (s) => s.provider === 'custom';
-  const isConfigured = (s) => (isCustom(s) ? !!(s.customKey.trim() && s.customBaseUrl.trim() && s.customModel.trim()) : !!s.apiKey.trim());
+  // Any service that accepts the same request format as OpenAI.
+  const isConfigured = (s) => !!(s.customKey.trim() && s.customBaseUrl.trim() && s.customModel.trim());
   const isReady = () => isConfigured(load());
   // Token Plan keys (sk-sp-…) use an endpoint that refuses browser calls.
   const isTokenPlanKey = (k) => /^sk-sp-/.test((k || '').trim());
 
   async function chat(body, settings = load(), options = {}) {
     if (!isConfigured(settings)) throw new Error('Add your AI key in Settings first.');
-    const custom = isCustom(settings);
-    const key = (custom ? settings.customKey : settings.apiKey).trim();
-    const base = (custom ? settings.customBaseUrl : PAYG_BASE).trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
-    // Qianwen's extra options (thinking, JSON mode, limits) can make other services reject the whole request.
-    const request = custom ? { model: settings.customModel.trim(), messages: body.messages } : { model: settings.model, ...body };
-    let res;
-    try {
-      res = await fetch(`${base}/chat/completions`, {
-        method: 'POST', signal: options.signal,
-        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-    } catch (e) {
-      if(options.signal?.aborted) throw new Error('Request timed out or was stopped. You can retry.');
-      throw new Error(custom ? 'Could not reach this service. Check the address; some services refuse calls from web pages.' : 'Could not reach Qianwen. Check your network connection.');
-    }
+    const key = settings.customKey.trim();
+    const base = settings.customBaseUrl.trim().replace(/\/+$/, '').replace(/\/chat\/completions$/i, '');
+    const model = settings.customModel.trim();
+    // enable_thinking is Qianwen's own option. A word limit can cut off models that think before answering.
+    const { enable_thinking, max_tokens, ...common } = body;
+    const request = { model, ...(/dashscope/i.test(base) ? body : common) };
+    const send = async (payload) => {
+      try {
+        return await fetch(`${base}/chat/completions`, {
+          method: 'POST', signal: options.signal,
+          headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch (e) {
+        if (options.signal?.aborted) throw new Error('Request timed out or was stopped. You can retry.');
+        throw new Error('Could not reach this service. Check the address; some services refuse calls from web pages.');
+      }
+    };
+    let res = await send(request);
+    // Some services reject the optional settings. Ask once more with only the essentials.
+    if (res.status === 400 && (request.temperature !== undefined || request.response_format)) res = await send({ model, messages: body.messages });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      const msg = data.error?.message || data.message || `HTTP ${res.status}`;
+      const problem = Array.isArray(data) ? data[0] || {} : data; // Gemini wraps its errors in a list
+      const msg = problem.error?.message || problem.message || `HTTP ${res.status}`;
       if (res.status === 401) throw new Error('API key was rejected (401). Check it in Settings.');
       throw new Error(msg);
     }
@@ -147,26 +151,28 @@ STEP 3. Using those facts, write the other fields:
 - "text": an optional short distinctive excerpt, verbatim, at most 200 characters. Use "" if none is useful; do not force a quote or repeat text merely to fill this field.
 - "source": the app or site if recognizable (Xiaohongshu, WeChat, Weibo, Douyin, Taobao, Dianping, Bilibili, Zhihu, Boss Zhipin, Nowcoder, Instagram, Twitter...), else "".
 - "emoji": one fitting emoji, or "◌" if the subject is unclear.
-- "collection": the best matching collection, copied EXACTLY from the list below. Strongly prefer an existing one whenever it could reasonably hold this content; do not force a clearly unrelated drawer. Only if no existing drawer reasonably fits, suggest a short, broad category and set "is_new_collection": true. A new name should fit many future screenshots (like 面经, 穿搭 or 菜谱), in the screenshot's main language, with no minimum word count. Avoid names specific to a company, position, shop, place or post: 字节面经 and 产品经理面经 are both just 面经. Put useful finer distinctions in tags without requiring a tag for every distinction. If the subject is unreadable or unknown, prefer an existing general-purpose drawer such as Unsorted; otherwise use "Unsorted" and mark it new. Do not invent a specific category from unclear content.
-- "confidence": 0-100 for the collection choice. 90+ only when it clearly belongs; below 60 when you are guessing.
-If the main content is unreadable or the image is blank, explain this briefly in the summary, use kind "other", leave details and tags empty, and give low confidence. If only part is blurry, use the legible content and omit uncertain facts without treating the entire image as unreadable.
-Write title, summary, new tags and new collection names in the screenshot's main language. Preserve original proper names and reuse existing drawer names and tags exactly. For mixed-language screenshots, follow the main content without forcing every word into one language.
+- "collection": a drawer copied EXACTLY from the list below, only when the content truly belongs in it: someone opening that drawer would expect to find this. Do not stretch a drawer to fit, and do not pick one just because it is the closest or shares a word. If none truly fits, use "". You cannot create drawers, so any name not in the list is wrong here.
+- "suggested_collection": only when "collection" is "": a drawer the person could add. Make it short and broad enough to hold many future screenshots (like 求职, 穿搭 or 菜谱), in the screenshot's main language. Not a narrow topic: 面经, 字节面经 and 产品经理面经 all belong under 求职, so put finer distinctions in tags. Use "" when a drawer was chosen, when the subject is unreadable or unknown, or when no clear category exists. Never suggest a catch-all such as Unsorted, 其他 or 杂项.
+- "confidence": 0-100 for the collection decision, including a decision that no drawer fits. 90+ only when it is clear; below 60 when you are guessing.
+If the main content is unreadable or the image is blank, explain this briefly in the summary, use kind "other", leave details and tags empty, leave collection and suggested_collection as "", and give low confidence. If only part is blurry, use the legible content and omit uncertain facts without treating the entire image as unreadable.
+Write title, summary, new tags and suggested_collection in the screenshot's main language. Preserve original proper names and reuse existing drawer names and tags exactly. For mixed-language screenshots, follow the main content without forcing every word into one language.
 
-Return ONLY one JSON object containing these fields: kind, details, title, summary, tags, text, source, emoji, collection, is_new_collection, confidence. Keep the fields present for the app, but use empty strings or arrays where allowed rather than inventing content. Set is_new_collection to false when reusing an existing drawer, true otherwise.
+Return ONLY one JSON object containing these fields: kind, details, title, summary, tags, text, source, emoji, collection, suggested_collection, confidence. Keep the fields present for the app, but use empty strings or arrays where allowed rather than inventing content.
 
 The examples below only show the format, not minimum amounts of content to produce. Never copy their shops, companies, facts or collection names.
 
 Example (a Dianping food screenshot):
-{"kind":"food","details":[{"label":"地址","value":"武汉市江汉区江汉路118号"},{"label":"人均","value":"¥15"},{"label":"菜品","value":"热干面\\n蛋酒"}],"title":"蔡林记 武汉热干面","summary":"博主觉得这家热干面芝麻酱味重，比连锁店地道。","tags":["美食","武汉","早餐"],"text":"","source":"Dianping","emoji":"🍜","collection":"Food & Recipes","is_new_collection":false,"confidence":92}
+{"kind":"food","details":[{"label":"地址","value":"武汉市江汉区江汉路118号"},{"label":"人均","value":"¥15"},{"label":"菜品","value":"热干面\\n蛋酒"}],"title":"蔡林记 武汉热干面","summary":"博主觉得这家热干面芝麻酱味重，比连锁店地道。","tags":["美食","武汉","早餐"],"text":"","source":"Dianping","emoji":"🍜","collection":"Food & Recipes","suggested_collection":"","confidence":92}
 
-Example (a Xiaohongshu interview post):
-{"kind":"interview","details":[{"label":"公司","value":"字节跳动"},{"label":"岗位","value":"产品经理"},{"label":"类型","value":"实习"},{"label":"轮次","value":"一面（视频，45分钟）"},{"label":"面试问题","value":"自我介绍\\n你最常用的App，有什么可以改进的地方\\n如何衡量一个功能是否成功"},{"label":"结果","value":"一周后通过"}],"title":"字节跳动 产品实习 一面面经","summary":"一面偏产品思维和数据指标，面试官会连续追问项目里的取舍。","tags":["面经","实习","产品经理"],"text":"字节跳动 产品经理实习 一面面经","source":"Xiaohongshu","emoji":"💼","collection":"面经","is_new_collection":true,"confidence":70}
+Example (a Xiaohongshu interview post, when no listed drawer fits):
+{"kind":"interview","details":[{"label":"公司","value":"字节跳动"},{"label":"岗位","value":"产品经理"},{"label":"类型","value":"实习"},{"label":"轮次","value":"一面（视频，45分钟）"},{"label":"面试问题","value":"自我介绍\\n你最常用的App，有什么可以改进的地方\\n如何衡量一个功能是否成功"},{"label":"结果","value":"一周后通过"}],"title":"字节跳动 产品实习 一面面经","summary":"一面偏产品思维和数据指标，面试官会连续追问项目里的取舍。","tags":["面经","实习","产品经理"],"text":"字节跳动 产品经理实习 一面面经","source":"Xiaohongshu","emoji":"💼","collection":"","suggested_collection":"求职","confidence":70}
 
 Existing collections:
 ${names || '(none yet)'}` + (preferences ? `\n\nThe person's own organization preferences (follow them, but keep the JSON fields above and never invent information that is not in the image):\n${preferences}` : '');
   }
 
-  // Read one screenshot. Returns { kind, title, summary, details, tags, collection, isNew, confidence, source, emoji, text }.
+  // Read one screenshot. Returns { kind, title, summary, details, tags, collection, suggestedCollection, isNew, confidence, source, emoji, text }.
+  // collection is always a real drawer or ''. isNew means no drawer fits, and suggestedCollection is the AI's idea for one to add.
   async function analyzeScreenshot(dataUrl, collections, options = {}) {
     const images = Array.isArray(dataUrl) ? dataUrl : [dataUrl];
     if (!images.length) throw new Error('No images to organize.');
@@ -186,15 +192,25 @@ ${names || '(none yet)'}` + (preferences ? `\n\nThe person's own organization pr
       response_format: { type: 'json_object' },
       max_tokens: 2000,
     }, load(), options);
-    return normalize(parseJson(content), collections);
+    const parsed = parseJson(content);
+    // A reply with nothing in it is a failed read: say so and allow a retry, instead of showing an Untitled capture.
+    const hasContent = [parsed.title, parsed.summary].some((x) => String(x || '').trim()) || (Array.isArray(parsed.details) && parsed.details.length > 0);
+    if (!hasContent) throw new Error('The AI returned an empty result. You can retry.');
+    return normalize(parsed, collections);
   }
 
   // Models sometimes fill a missing fact with a placeholder instead of leaving the row out.
   const EMPTY = /^(未知|不详|未提及|未显示|未说明|暂无|无|n\/?a|none|null|unknown|not shown|not mentioned|-+)$/i;
+  // A drawer called this would become a junk pile, so it is never offered.
+  const CATCH_ALL = /^(unsorted|uncategori[sz]ed|misc|miscellaneous|others?|未分类|其他|其它|杂项)$/i;
 
   // Clean up whatever came back so the rest of the app can trust the shape.
   function normalize(r, collections) {
-    const match = collections.find((c) => c.name.toLowerCase() === String(r.collection || '').trim().toLowerCase());
+    const findDrawer = (name) => collections.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    // Only the person adds drawers: a name that is not a real drawer can only be a suggestion.
+    const named = String(r.collection || '').trim();
+    const suggested = String(r.suggested_collection || '').trim() || named;
+    const match = findDrawer(named) || findDrawer(suggested);
     const details = (Array.isArray(r.details) ? r.details : [])
       .map((d) => ({ label: String(d?.label || '').trim().replace(/[:：]$/, '').slice(0, 30), value: String(d?.value ?? '').replace(/\\n/g, '\n').trim().slice(0, 2000) }))
       .filter((d) => d.label && d.value && !EMPTY.test(d.value))
@@ -208,7 +224,8 @@ ${names || '(none yet)'}` + (preferences ? `\n\nThe person's own organization pr
       text: String(r.text || ''),
       source: String(r.source || ''),
       emoji: String(r.emoji || '◌').slice(0, 4),
-      collection: match ? match.name : String(r.collection || 'Unsorted').trim(),
+      collection: match ? match.name : '',
+      suggestedCollection: match || CATCH_ALL.test(suggested) ? '' : [...suggested].slice(0, 30).join(''),
       isNew: !match,
       confidence: Math.max(0, Math.min(100, Math.round(Number(r.confidence) || 0))),
     };
@@ -236,5 +253,5 @@ ${names || '(none yet)'}` + (preferences ? `\n\nThe person's own organization pr
     return { ...c, tags, userTags };
   }
 
-  return { load, save, isReady, isCustom, isConfigured, isTokenPlanKey, test, analyzeScreenshot, buildPrompt, normalize, addDrawerTags, dropUnusedTags, KINDS, MODELS };
+  return { load, save, isReady, isConfigured, isTokenPlanKey, test, analyzeScreenshot, buildPrompt, normalize, addDrawerTags, dropUnusedTags, KINDS };
 })();

@@ -7,6 +7,9 @@ window.LocusImports = (() => {
   const UNFINISHED_STATES = [...OPEN_STATES,'queued'];
   const uid = p => `${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,10)}`;
   let running = null;
+  // Imports waiting for the one that is running, oldest first. Kept in memory: after a reload they show Organize again.
+  const MAX_IMPORTS = 5; // the running one plus the ones in line
+  let line = [];
   const scans = new Set();
   const snapshot = () => S.load();
   const ledger = d => d.imports || {batches:[],tasks:[],decisions:[]};
@@ -128,15 +131,24 @@ window.LocusImports = (() => {
     change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>t.id===id && t.state==='skipped' ? {...t,state:'screen',screened:false} : t)}}));
   }
   function updateItem(id,patch) {
-    const allowed=['title','summary','details','tags','note','aiGuess','suggestedDrawer'];
+    const allowed=['title','summary','details','tags','note','aiGuess','aiSuggestion'];
     const safe=Object.fromEntries(allowed.filter(k=>k in patch).map(k=>[k,patch[k]]));
     change(d=>({...d,queue:d.queue.map(item=>item.id===id ? {...item,...safe,updatedAt:Date.now()} : item)}));
   }
   async function run(batchId) {
     if(ledger(snapshot()).tasks.some(t=>t.batchId===batchId && ['screen','saving'].includes(t.state))) throw Error('Review your photos before organizing them.');
     if(ledger(snapshot()).tasks.some(t=>t.batchId===batchId && t.state==='ready' && !t.screened)) throw Error('Review your photos before organizing them.');
-    if(running) throw Error('Another batch is still finishing. Please wait.');
     if(!window.LocusAI.isReady()) throw Error('Add your AI key in Settings first.');
+    if(running?.batchId===batchId || line.includes(batchId)) return;
+    if(running) {
+      if(line.length>=MAX_IMPORTS-1) throw Error(`Up to ${MAX_IMPORTS} imports can be organized or in line. Try again when one finishes.`);
+      line.push(batchId);
+      return;
+    }
+    await runNow(batchId);
+  }
+  // Starts synchronously, so running is already set when this returns its promise.
+  async function runNow(batchId) {
     const control={batchId,paused:false};running=control;
     const work=async()=>{
       updateBatch(batchId,{paused:false});
@@ -149,7 +161,8 @@ window.LocusImports = (() => {
           const updateGroup = patch => change(d=>({...d,imports:{...d.imports,tasks:d.imports.tasks.map(t=>taskIds.includes(t.id) ? {...t,...patch,groupHead:id,taskIds,imageIds,updatedAt:Date.now(),result:t.id===id ? patch.result ?? t.result : null} : t)}}));
           updateGroup({state:'working',error:null});
           const controller=new AbortController();
-          const timer=setTimeout(()=>controller.abort(),60000);
+          // Long posts really take minutes. The limit is only there so a dead connection can't spin forever.
+          const timer=setTimeout(()=>controller.abort(),5*60*1000);
           try {
             const dataUrls=await Promise.all(imageIds.map(imageId=>I.get(imageId)));
             const lost=dataUrls.findIndex(url=>!url);
@@ -172,8 +185,14 @@ window.LocusImports = (() => {
     try {
       if(navigator.locks) await navigator.locks.request('locus-ai-import',{ifAvailable:true},async lock=>{if(!lock) throw Error('Recognition is running in another tab.');await work();});
       else await work();
-    } finally { running=null;updateBatch(batchId,{lastRunAt:Date.now()}); }
+    } finally { running=null;updateBatch(batchId,{lastRunAt:Date.now()});startNext(); }
   }
+  // A batch that fails to start keeps its photos and shows Organize again, so the rest of the line carries on.
+  function startNext() {
+    const next=line.shift();
+    if(next) runNow(next).catch(e=>console.warn('Could not organize a waiting import',e));
+  }
+  function cancelWaiting(batchId) { line=line.filter(id=>id!==batchId); }
   function pause(batchId) {
     if(running?.batchId===batchId) running.paused=true;
     updateBatch(batchId,{paused:true});
@@ -187,6 +206,7 @@ window.LocusImports = (() => {
       title:r.title, summary:r.summary, text:r.text || '', tags:r.tags,
       kind:r.kind || null, details:r.details || [],
       aiGuess:d.collections.find(c=>c.id===batch.targetId)?.name || batch.targetName || r.collection,
+      aiSuggestion:batch.targetId ? '' : r.suggestedCollection || '',
       aiIsNew:batch.targetId ? false : r.isNew,
       aiConfidence:batch.targetId ? 100 : r.confidence,
       addedAt:Date.now(),
@@ -221,6 +241,7 @@ window.LocusImports = (() => {
   // including photos waiting to be confirmed, is removed with its image.
   async function removeBatch(batchId) {
     if(running?.batchId===batchId) throw Error('This import is still organizing. Pause it first.');
+    cancelWaiting(batchId);
     const d0=snapshot(), tasks=ledger(d0).tasks.filter(t=>t.batchId===batchId);
     const drop=new Set(tasks.filter(t=>t.state!=='kept').map(t=>t.id));
     const mine=new Set(tasks.map(t=>t.id));
@@ -364,5 +385,5 @@ window.LocusImports = (() => {
       return {...d,queue:[...d.queue,last.item],imports:{...d.imports,tasks:d.imports.tasks.map(t=>itemTaskIds(last.item).includes(t.id) ? {...t,state:'queued'} : t),decisions:d.imports.decisions.filter(x=>x.id!==last.id)}};
     });
   }
-  return {OPEN_STATES,UNFINISHED_STATES,groupPhotos,snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,choose,setClipped,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
+  return {MAX_PHOTOS:30,isWaiting:id=>line.includes(id),importsAhead:id=>line.indexOf(id)+1,cancelWaiting,OPEN_STATES,UNFINISHED_STATES,groupPhotos,snapshot,createBatch,addFiles,recover,run,pause,review,remove,removeBatch,cleanup,choose,setClipped,rescreen,updateItem,decide,undo,restore,fingerprint,isRunning:id=>!!running && running.batchId===id,isBusy:()=>!!running};
 })();

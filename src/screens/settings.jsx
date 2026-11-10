@@ -1,14 +1,14 @@
-// Folio — Settings: the Qianwen key, model, preferences, export
+// Folio — Settings: the AI service, preferences, export
 
 function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
   const AI = window.LocusAI;
   const [s, setS] = useState(() => AI.load());
-  const [status, setStatus] = useState(null); // {kind:'ok'|'err'|'busy', msg}
+  const [status, setStatus] = useState(null); // backup and restore problems: {kind:'err', msg}
+  const [testResult, setTestResult] = useState(null); // {kind:'ok'|'err'|'busy', msg}
   const [show, setShow] = useState(false);
-  const pick = (patch) => { setS((p) => ({ ...p, ...patch })); setStatus(null); };
+  const pick = (patch) => { setS((p) => ({ ...p, ...patch })); setStatus(null); setTestResult(null); };
   const set = (k, v) => pick({ [k]: v });
-  const custom = AI.isCustom(s);
-  const canTest = AI.isConfigured(s) && status?.kind !== 'busy';
+  const canTest = AI.isConfigured(s) && testResult?.kind !== 'busy';
 
   const Backup = window.LocusBackup;
   const [working, setWorking] = useState(null); // 'backup' | 'restore' while one is running
@@ -49,9 +49,9 @@ function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
     setConfirm({ message: "Your changes to Settings won't be saved.", okLabel: 'Discard changes', danger: true, onOk: () => onClose() });
   };
   const test = async () => {
-    setStatus({ kind: 'busy', msg: 'Testing…' });
-    try { await AI.test(s); AI.save(s); setStatus({ kind: 'ok', msg: `Connected · ${custom ? s.customModel.trim() : s.model}` }); }
-    catch (e) { setStatus({ kind: 'err', msg: e.message }); }
+    setTestResult({ kind: 'busy', msg: 'Testing…' });
+    try { await AI.test(s); AI.save(s); setTestResult({ kind: 'ok', msg: `Connected · ${s.customModel.trim()}` }); }
+    catch (e) { setTestResult({ kind: 'err', msg: e.message }); }
   };
 
   const line = HAIR;
@@ -60,17 +60,13 @@ function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
   const headingLabel = { ...label, color: 'var(--ink)' };
   const section = { padding: '18px', borderBottom: line };
   const button = { background: 'transparent', border: 'none', borderRadius: 0, color: 'inherit', cursor: 'pointer', fontSize: TY.caption, fontWeight: 400 };
-  const modelRow = (key, checked, onPick, title, note) => (
-    <button key={key} role="radio" aria-checked={checked} onClick={onPick} style={{ ...button, width: '100%', minHeight: 72, display: 'flex', alignItems: 'center', textAlign: 'left', gap: 14, padding: '14px 18px', borderBottom: line }}>
-      <span aria-hidden="true" style={{ width: 8, height: 8, flexShrink: 0, border: '1px solid var(--ink-2)', borderRadius: '50%', background: checked ? 'var(--ink)' : 'transparent' }}/>
-      <span style={{ minWidth: 0 }}><span style={{ display: 'block', fontSize: TY.body, lineHeight: 1.5 }}>{title}</span><span style={{ display: 'block', fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.5, marginTop: 3 }}>{note}</span></span>
-    </button>
-  );
   const dataRow = (onClick, title, note) => (
     <button disabled={!!working} onClick={onClick} style={{ ...button, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18, padding: '18px', textAlign: 'left', width: '100%', borderBottom: line }}>
       <span><span style={{ display: 'block', fontSize: TY.body, lineHeight: 1.5 }}>{title}</span><span style={{ display: 'block', fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6, marginTop: 6 }}>{note}</span></span><Arrow dir="right"/>
     </button>
   );
+  const fieldLabel = { ...label, padding: '14px 18px 0' };
+  const keyLink = (href, title) => <a href={href} target="_blank" rel="noreferrer" style={{ display: 'block', width: 'fit-content', color: 'inherit', textUnderlineOffset: 3 }}>{title}</a>;
   const field = { width: '100%', minWidth: 0, background: 'transparent', border: 'none', borderRadius: 0, outline: 'none', color: 'var(--ink)', fontSize: TY.body, lineHeight: 1.5, padding: '14px 18px' };
 
   return (
@@ -84,30 +80,28 @@ function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
           </button>
         </div>
         <div className="scroll-y" style={{ flex: 1, minHeight: 0 }}>
-          <div style={heading}><label htmlFor="settings-key" style={headingLabel}>{custom ? 'API KEY' : 'QIANWEN API KEY'}</label></div>
+          <div style={heading}><div style={headingLabel}>AI MODEL</div></div>
+          <label htmlFor="settings-address" style={fieldLabel}>API ADDRESS</label>
+          <input id="settings-address" value={s.customBaseUrl} onChange={e=>set('customBaseUrl',e.target.value)} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false} style={{ ...field, borderBottom: line }}/>
+          <label htmlFor="settings-key" style={fieldLabel}>API KEY</label>
           <div style={{ display: 'flex', borderBottom: line }}>
-            <input id="settings-key" type={show ? 'text' : 'password'} value={custom ? s.customKey : s.apiKey} onChange={e=>set(custom ? 'customKey' : 'apiKey',e.target.value)} placeholder="sk-…" autoComplete="off" spellCheck={false} style={{ ...field, flex: 1 }}/>
+            <input id="settings-key" type={show ? 'text' : 'password'} value={s.customKey} onChange={e=>set('customKey',e.target.value)} placeholder="Your API key" autoComplete="off" spellCheck={false} style={{ ...field, flex: 1 }}/>
             <button onClick={()=>setShow(v=>!v)} aria-pressed={show} style={{ ...button, width: 72, flexShrink: 0, borderLeft: line }}>{show ? 'Hide' : 'Show'}</button>
           </div>
+          <label htmlFor="settings-model" style={fieldLabel}>MODEL NAME</label>
+          <input id="settings-model" value={s.customModel} onChange={e=>set('customModel',e.target.value)} placeholder="The exact model name" autoComplete="off" spellCheck={false} style={{ ...field, borderBottom: line }}/>
           <div style={{ ...section, fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6 }}>
-            {custom ? 'It stays in this browser only and is sent nowhere except the address below.' : <>
-            Get one at <a href="https://platform.qianwenai.com/home/api-keys" target="_blank" rel="noreferrer" style={{ color: 'inherit', textUnderlineOffset: 3 }}>platform.qianwenai.com</a>.
-            {' '}It stays in this browser only and is sent nowhere except Qianwen.
-            {AI.isTokenPlanKey(s.apiKey) && <div style={{ marginTop: 12 }}>This looks like a Token Plan key (sk-sp-…). Qianwen's Token Plan address doesn't accept calls from web pages, so please use a pay-as-you-go key.</div>}
-            </>}
+            The model must be able to read images. Some services refuse calls from web pages, and those won't work here. Your key stays in this browser and is sent only to the address above.
+            {AI.isTokenPlanKey(s.customKey) && <div style={{ marginTop: 12 }}>This looks like a Qianwen Token Plan key (sk-sp-…). That plan doesn't accept calls from web pages, so please use a pay-as-you-go key.</div>}
+            <div style={{ marginTop: 12 }}>
+              {keyLink('https://aistudio.google.com/apikey', 'Get a Gemini key')}
+              {keyLink('https://platform.qianwenai.com/home/api-keys', 'Get a Qianwen key')}
+            </div>
           </div>
-          <div style={heading}><div id="settings-model-label" style={headingLabel}>MODEL</div></div>
-          <div role="radiogroup" aria-labelledby="settings-model-label">
-            {AI.MODELS.map(m => modelRow(m.id, !custom && s.model === m.id, () => pick({ provider: 'qianwen', model: m.id }), m.id, m.note))}
-            {modelRow('custom', custom, () => pick({ provider: 'custom' }), 'Custom', 'Another AI service, with your own key')}
+          <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 56, borderBottom: line }}>
+            <button onClick={test} disabled={!canTest} style={{ ...button, flexShrink: 0, padding: '0 18px', fontSize: TY.body, borderRight: testResult ? line : 'none', opacity: canTest ? 1 : 0.4 }}>Test connection</button>
+            <div role="status" aria-live="polite" style={{ flex: 1, minWidth: 0, alignSelf: 'center', padding: '10px 18px', fontSize: TY.caption, lineHeight: 1.5, overflowWrap: 'anywhere' }}>{testResult?.msg}</div>
           </div>
-          {custom && <>
-            <label htmlFor="settings-custom-base" style={{ ...label, padding: '14px 18px 0' }}>API ADDRESS</label>
-            <input id="settings-custom-base" value={s.customBaseUrl} onChange={e=>set('customBaseUrl',e.target.value)} placeholder="https://api.example.com/v1" autoComplete="off" spellCheck={false} style={{ ...field, borderBottom: line }}/>
-            <label htmlFor="settings-custom-model" style={{ ...label, padding: '14px 18px 0' }}>MODEL NAME</label>
-            <input id="settings-custom-model" value={s.customModel} onChange={e=>set('customModel',e.target.value)} placeholder="The exact model name" autoComplete="off" spellCheck={false} style={{ ...field, borderBottom: line }}/>
-            <div style={{ ...section, fontSize: TY.caption, color: 'var(--ink-2)', lineHeight: 1.6 }}>The model must be able to read images. Some services refuse calls from web pages, and those won't work here.</div>
-          </>}
           <div style={heading}><label htmlFor="settings-preferences" style={headingLabel}>ORGANIZATION PREFERENCES</label></div>
           <textarea id="settings-preferences" value={s.preferences || ''} onChange={e=>set('preferences',e.target.value)} rows={4} placeholder="How should AI organize your photos?" style={{...field,display:'block',resize:'vertical',borderBottom:line}}/>
           {s.preferences && <button onClick={()=>set('preferences','')} style={{...button,padding:'14px 18px',borderBottom:line,width:'100%',textAlign:'left'}}>Reset preferences</button>}
@@ -125,7 +119,6 @@ function SettingsScreen({ onClose, onToast, onExport, onShowIntro }) {
           <div style={{ height: 24 }}/>
         </div>
         <div style={{ display: 'flex', flexShrink: 0, borderTop: line, paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}>
-          <button onClick={test} disabled={!canTest} style={{ ...button, flex: 1, minHeight: 56, padding: '16px', borderRight: line, opacity: canTest ? 1 : 0.4 }}>Test connection</button>
           <button onClick={saveAndClose} style={{ ...button, flex: 1, minHeight: 56, padding: '16px' }}>Save</button>
         </div>
       </div>
